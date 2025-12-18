@@ -42,6 +42,7 @@ jobs:
         with:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ env.DOCKERHUB_TOKEN }}
+          registry: ${{ secrets.DOCKERHUB_OWNER }}
       - name: Build and push lake image
         uses: docker/build-push-action@v3
         with:
@@ -66,6 +67,7 @@ jobs:
         with:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ env.DOCKERHUB_TOKEN }}
+          registry: ${{ secrets.DOCKERHUB_OWNER }}
       - name: Build and push lake image
         uses: docker/build-push-action@v3
         with:
@@ -97,6 +99,7 @@ jobs:
         with:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ env.DOCKERHUB_TOKEN }}
+          registry: ${{ secrets.DOCKERHUB_OWNER }}
       - uses: actions/cache@v3
         with:
           path: /tmp/devlake-build-cache-${{ matrix.platform }}
@@ -141,6 +144,7 @@ jobs:
         with:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ env.DOCKERHUB_TOKEN }}
+          registry: ${{ secrets.DOCKERHUB_OWNER }}
       - uses: actions/cache@v3
         with:
           path: /tmp/devlake-build-cache-amd64
@@ -220,6 +224,7 @@ jobs:
         with:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ env.DOCKERHUB_TOKEN }}
+          registry: ${{ secrets.DOCKERHUB_OWNER }}
       - name: Get push tags
         id: get_push_tags
         run: |
