@@ -145,8 +145,6 @@ jobs:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ env.DOCKERHUB_TOKEN }}
           registry: ${{ secrets.DOCKERHUB_OWNER }}
-      - name: size before cleanup
-        run: df && echo "=========" && du -hd2 /usr && echo "=========" && du -hd1 /opt
       - name: Free Disk Space
         uses: endersonmenezes/free-disk-space@v3  # Use @main for latest, @v3 for stable
         with:
@@ -161,8 +159,6 @@ jobs:
           rm_cmd: "rm"  # Use 'rmz' for faster deletion (default: 'rm')
           rmz_version: "3.1.1"  # Required when rm_cmd is 'rmz'
           testing: false
-      - name: size after cleanup
-        run: df && echo "=========" && du -hd2 /usr && echo "=========" && du -hd1 /opt
       - uses: actions/cache@v3
         with:
           path: /tmp/devlake-build-cache-amd64
