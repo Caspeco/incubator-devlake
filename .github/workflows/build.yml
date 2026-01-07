@@ -145,7 +145,23 @@ jobs:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ env.DOCKERHUB_TOKEN }}
           registry: ${{ secrets.DOCKERHUB_OWNER }}
-      - name: size before cache
+      - name: size before cleanup
+        run: df && echo "=========" && du -hd2 /usr && echo "=========" && du -hd1 /opt
+      - name: Free Disk Space
+        uses: endersonmenezes/free-disk-space@v3  # Use @main for latest, @v3 for stable
+        with:
+          remove_android: true
+          remove_dotnet: true
+          remove_haskell: true
+          remove_tool_cache: true
+          remove_swap: true
+          remove_packages: "azure-cli google-cloud-cli microsoft-edge-stable google-chrome-stable firefox postgresql* temurin-* *llvm* mysql* dotnet-sdk-*"
+          remove_packages_one_command: true
+          remove_folders: "/usr/share/swift /usr/share/miniconda /usr/share/az* /usr/local/lib/node_modules /usr/local/share/chromium /usr/local/share/powershell /usr/local/julia /usr/local/aws-cli /usr/local/aws-sam-cli /usr/share/gradle"
+          rm_cmd: "rm"  # Use 'rmz' for faster deletion (default: 'rm')
+          rmz_version: "3.1.1"  # Required when rm_cmd is 'rmz'
+          testing: false
+      - name: size after cleanup
         run: df && echo "=========" && du -hd2 /usr && echo "=========" && du -hd1 /opt
       - uses: actions/cache@v3
         with:
@@ -155,8 +171,6 @@ jobs:
         with:
           path: /tmp/devlake-build-cache-arm64
           key: buildx-devlake-build-cache-${{ github.run_id }}-arm64
-      - name: size after cache
-        run: df && echo "=========" && du -hd2 /usr && echo "=========" && du -hd1 /opt
       - name: Get push tags
         id: get_push_tags
         run: |
