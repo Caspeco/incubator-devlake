@@ -146,7 +146,7 @@ jobs:
           password: ${{ env.DOCKERHUB_TOKEN }}
           registry: ${{ secrets.DOCKERHUB_OWNER }}
       - name: size before cache
-        run: df && echo "=========" && du -hd1 --exclude '/proc*' / && echo "=========" && du -hd1 /tmp
+        run: df && echo "=========" && du -hd2 /usr && echo "=========" && du -hd1 /opt
       - uses: actions/cache@v3
         with:
           path: /tmp/devlake-build-cache-amd64
@@ -156,7 +156,7 @@ jobs:
           path: /tmp/devlake-build-cache-arm64
           key: buildx-devlake-build-cache-${{ github.run_id }}-arm64
       - name: size after cache
-        run: df && echo "=========" && du -hd1 --exclude '/proc*' / && echo "=========" && du -hd1 /tmp
+        run: df && echo "=========" && du -hd2 /usr && echo "=========" && du -hd1 /opt
       - name: Get push tags
         id: get_push_tags
         run: |
