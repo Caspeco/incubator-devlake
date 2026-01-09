@@ -24,26 +24,27 @@ import (
 )
 
 type GithubDeployment struct {
-	common.NoPKModel  `json:"-" mapstructure:"-"`
-	ConnectionId      uint64 `json:"connection_id" gorm:"primaryKey"`
-	GithubId          int    `json:"github_id"`
-	Id                string `json:"id" gorm:"type:varchar(255);primaryKey"`
-	DisplayTitle      string
-	Url               string
-	DatabaseId        uint       `json:"database_id"`
-	CommitOid         string     `json:"commit_oid" gorm:"type:varchar(255)"`
-	Description       string     `json:"description" gorm:"type:varchar(255)"`
-	Environment       string     `json:"environment" gorm:"type:varchar(255)"`
-	State             string     `json:"state" gorm:"type:varchar(255)"`
-	LatestStatusState string     `json:"latest_status_state" gorm:"type:varchar(255)"`
-	LatestUpdatedDate *time.Time `json:"latest_status_update_date"`
-	RepositoryID      string     `json:"repository_id" gorm:"type:varchar(255)"`
-	RepositoryName    string     `json:"repository_name" gorm:"type:varchar(255)"`
-	RepositoryUrl     string     `json:"repository_url" gorm:"type:varchar(255)"`
-	RefName           string     `json:"ref_name" gorm:"type:varchar(255)"`
-	Payload           string     `json:"payload" gorm:"type:text"`
-	CreatedDate       time.Time  `json:"created_at"`
-	UpdatedDate       time.Time  `json:"updated_at"`
+	common.NoPKModel         `json:"-" mapstructure:"-"`
+	ConnectionId             uint64 `json:"connection_id" gorm:"primaryKey"`
+	GithubId                 int    `json:"github_id"`
+	Id                       string `json:"id" gorm:"type:varchar(255);primaryKey"`
+	DisplayTitle             string
+	Url                      string
+	DatabaseId               uint       `json:"database_id"`
+	CommitOid                string     `json:"commit_oid" gorm:"type:varchar(255)"`
+	Description              string     `json:"description" gorm:"type:varchar(255)"`
+	Environment              string     `json:"environment" gorm:"type:varchar(255)"`
+	State                    string     `json:"state" gorm:"type:varchar(255)"`
+	LatestStatusState        string     `json:"latest_status_state" gorm:"type:varchar(255)"`
+	LatestUpdatedDate        *time.Time `json:"latest_status_update_date"`
+	LatestSuccessUpdatedDate *time.Time `json:"latest_success_updated_date"`
+	RepositoryID             string     `json:"repository_id" gorm:"type:varchar(255)"`
+	RepositoryName           string     `json:"repository_name" gorm:"type:varchar(255)"`
+	RepositoryUrl            string     `json:"repository_url" gorm:"type:varchar(255)"`
+	RefName                  string     `json:"ref_name" gorm:"type:varchar(255)"`
+	Payload                  string     `json:"payload" gorm:"type:text"`
+	CreatedDate              time.Time  `json:"created_at"`
+	UpdatedDate              time.Time  `json:"updated_at"`
 }
 
 func (GithubDeployment) TableName() string {

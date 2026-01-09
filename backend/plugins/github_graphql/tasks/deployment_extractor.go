@@ -75,28 +75,38 @@ func ExtractDeployments(taskCtx plugin.SubTaskContext) errors.Error {
 
 func convertGithubDeployment(deployment *GraphqlQueryDeploymentDeployment, connectionId uint64, githubId int) (*githubModels.GithubDeployment, errors.Error) {
 	ret := &githubModels.GithubDeployment{
-		ConnectionId:      connectionId,
-		GithubId:          githubId,
-		NoPKModel:         common.NewNoPKModel(),
-		Id:                deployment.Id,
-		DisplayTitle:      strings.Split(deployment.Commit.Message, "\n")[0],
-		Url:               deployment.Repository.Url + "/deployments/" + deployment.Environment,
-		DatabaseId:        deployment.DatabaseId,
-		Payload:           deployment.Payload,
-		Description:       deployment.Description,
-		CommitOid:         deployment.CommitOid,
-		Environment:       deployment.Environment,
-		State:             deployment.State,
-		RepositoryID:      deployment.Repository.Id,
-		RepositoryName:    deployment.Repository.Name,
-		RepositoryUrl:     deployment.Repository.Url,
-		CreatedDate:       deployment.CreatedAt,
-		UpdatedDate:       deployment.UpdatedAt,
-		LatestStatusState: deployment.LatestStatus.State,
-		LatestUpdatedDate: deployment.LatestStatus.UpdatedAt,
+		ConnectionId:             connectionId,
+		GithubId:                 githubId,
+		NoPKModel:                common.NewNoPKModel(),
+		Id:                       deployment.Id,
+		DisplayTitle:             strings.Split(deployment.Commit.Message, "\n")[0],
+		Url:                      deployment.Repository.Url + "/deployments/" + deployment.Environment,
+		DatabaseId:               deployment.DatabaseId,
+		Payload:                  deployment.Payload,
+		Description:              deployment.Description,
+		CommitOid:                deployment.CommitOid,
+		Environment:              deployment.Environment,
+		State:                    deployment.State,
+		RepositoryID:             deployment.Repository.Id,
+		RepositoryName:           deployment.Repository.Name,
+		RepositoryUrl:            deployment.Repository.Url,
+		CreatedDate:              deployment.CreatedAt,
+		UpdatedDate:              deployment.UpdatedAt,
+		LatestStatusState:        deployment.LatestStatus.State,
+		LatestUpdatedDate:        deployment.LatestStatus.UpdatedAt,
+		LatestSuccessUpdatedDate: deployment.LatestStatus.UpdatedAt,
 	}
 	if deployment.Ref != nil {
 		ret.RefName = deployment.Ref.Name
 	}
+
+	// Find the first SUCCESS status and set LatestSuccessUpdatedDate
+	for _, status := range deployment.Statuses.Nodes {
+		if status.State == "SUCCESS" {
+			ret.LatestSuccessUpdatedDate = &status.UpdatedAt
+			break
+		}
+	}
+
 	return ret, nil
 }

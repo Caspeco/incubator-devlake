@@ -19,6 +19,7 @@ package tasks
 
 import (
 	"reflect"
+	"regexp"
 
 	"github.com/apache/incubator-devlake/core/dal"
 	"github.com/apache/incubator-devlake/core/errors"
@@ -90,7 +91,7 @@ func ConvertDeployment(taskCtx plugin.SubTaskContext) errors.Error {
 				TaskDatesInfo: devops.TaskDatesInfo{
 					CreatedDate:  githubDeployment.CreatedDate,
 					StartedDate:  &githubDeployment.CreatedDate,
-					FinishedDate: &githubDeployment.UpdatedDate,
+					FinishedDate: githubDeployment.LatestSuccessUpdatedDate,
 				},
 				CommitSha:    githubDeployment.CommitOid,
 				RefName:      githubDeployment.RefName,
@@ -103,8 +104,9 @@ func ConvertDeployment(taskCtx plugin.SubTaskContext) errors.Error {
 			durationSec := float64(githubDeployment.UpdatedDate.Sub(githubDeployment.CreatedDate).Milliseconds() / 1e3)
 			deploymentCommit.DurationSec = &durationSec
 
+			versionPattern := regexp.MustCompile(`^\d+\.\d+`)
 			if data.RegexEnricher != nil {
-				if data.RegexEnricher.ReturnNameIfMatched(devops.ENV_NAME_PATTERN, githubDeployment.Environment) != "" {
+				if data.RegexEnricher.ReturnNameIfMatched(devops.ENV_NAME_PATTERN, githubDeployment.Environment) != "" && versionPattern.MatchString(githubDeployment.RefName) {
 					deploymentCommit.Environment = devops.PRODUCTION
 				}
 			}
