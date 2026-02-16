@@ -42,6 +42,7 @@ var ConvertDeploymentsMeta = plugin.SubTaskMeta{
 	EnabledByDefault: true,
 	Description:      "Convert tool layer table github_deployments into domain layer table deployment",
 	DomainTypes:      []string{plugin.DOMAIN_TYPE_CICD},
+	Dependencies:     []*plugin.SubTaskMeta{&DedupDeploymentsMeta},
 	DependencyTables: []string{models.GithubDeployment{}.TableName()},
 	ProductTables:    []string{devops.CicdDeploymentCommit{}.TableName(), devops.CICDDeployment{}.TableName()},
 }

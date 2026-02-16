@@ -1,0 +1,451 @@
+From 6aa5bf3a1570ca5630649dd8b782447dfa031a4e Mon Sep 17 00:00:00 2001
+From: Lukasz Borawski <lukasz.borawski@trivec.be>
+Date: Fri, 13 Feb 2026 10:02:09 +0100
+Subject: [PATCH] Deployment exclusion (Caspeco Patch #2)
+
+---
+ CASPECO.md                                    | 90 +++++++++++++++++++
+ backend/Dockerfile                            | 42 ++++++---
+ backend/plugins/github_graphql/impl/impl.go   |  1 +
+ .../tasks/deployment_convertor.go             |  1 +
+ .../tasks/deployment_deduper.go               | 68 ++++++++++++++
+ docker-compose.yml                            | 89 ++++++++++++++++++
+ grafana/Dockerfile                            |  1 +
+ .../DORADetails-ChangeFailureRate.json        |  4 +-
+ 8 files changed, 284 insertions(+), 12 deletions(-)
+ create mode 100644 CASPECO.md
+ create mode 100644 backend/plugins/github_graphql/tasks/deployment_deduper.go
+ create mode 100644 docker-compose.yml
+
+diff --git a/CASPECO.md b/CASPECO.md
+new file mode 100644
+index 000000000..f6126dfb3
+--- /dev/null
++++ b/CASPECO.md
+@@ -0,0 +1,90 @@
++# CASPECO Fork Changes
++
++Baseline commit: `96f625370ce6eb1c2f658646492681c14f59cbfe`
++
++This document lists each change introduced in this fork after the baseline commit, one section per commit.
++
++## 2025-12-18 - Configure build pipelines (`bdb549197716fa6ce663372f11268d22865afd8d`)
++
++### What changed
++- Reduced and simplified GitHub Actions workflow surface.
++- Removed many ASF/community maintenance workflows from this fork.
++- Updated image build workflow behavior.
++
++### Key details
++- Deleted multiple workflows, including lint/check/stale/e2e helper workflows (for example: `NOTICE-year-check`, `asf-header-check`, `auto-cherry-pick`, `test-e2e`, `yaml-lint`, etc.).
++- `build.yml` updates:
++  - Added explicit `registry: ${{ secrets.DOCKERHUB_OWNER }}` to Docker login steps.
++  - Limited one matrix build path to `amd64`.
++  - Added a `Free Disk Space` step before build cache/build execution.
++  - Removed the `build-and-push-other-image` job (`config-ui`, `grafana`).
++- `test.yml` update:
++  - Removed nightly scheduled run (`cron`).
++
++### Files
++- `.github/workflows/build.yml`
++- `.github/workflows/test.yml`
++- 14 additional deleted workflow files under `.github/workflows/`
++
++---
++
++## 2026-01-09 - Applied Caspeco Patch (`dd80dc8c79b29b79fdfe3922db762e9e1f9a43f9`)
++
++### What changed
++- Extended GitHub deployment model with explicit latest successful status timestamp.
++- Updated GitHub GraphQL deployment collection/extraction/conversion behavior.
++
++### Key details
++- Added `latest_success_updated_date` to `_tool_github_deployments` model.
++- Added migration script to create the new column:
++  - `20251217_add_latest_status_update_date_to_deployment.go`
++- GraphQL collector now requests deployment status history (`statuses(first: 10)`).
++- Extractor now derives `LatestSuccessUpdatedDate`:
++  - defaults to `LatestStatus.updatedAt`
++  - overridden by first `SUCCESS` status timestamp if present.
++- Deployment converter now uses `LatestSuccessUpdatedDate` as `finished_date` in domain conversion.
++- Production classification tightened:
++  - `ENV_NAME_PATTERN` match now also requires a version-like `ref_name` (`^\d+\.\d+`).
++- Added `caspeco.patch` artifact file to the repo.
++
++### Files
++- `backend/plugins/github/models/deployment.go`
++- `backend/plugins/github/models/migrationscripts/20251217_add_latest_status_update_date_to_deployment.go`
++- `backend/plugins/github/models/migrationscripts/register.go`
++- `backend/plugins/github_graphql/tasks/deployment_collector.go`
++- `backend/plugins/github_graphql/tasks/deployment_extractor.go`
++- `backend/plugins/github_graphql/tasks/deployment_convertor.go`
++- `caspeco.patch`
++
++---
++
++## 2026-02-13 - Deployment exclusion (`f0ad0e8d3d2fe0d0a2a2dbe503179120cdf3f03d`)
++
++### What changed
++- Added post-extract SQL deduplication for GitHub GraphQL deployments.
++- Updated build/runtime packaging and local orchestration assets.
++- Adjusted Grafana DORA Change Failure Rate dashboard deployment filter.
++
++### Key details
++- Added `DedupDeployments` subtask in GitHub GraphQL:
++  - Dedup key: `connection_id, github_id, environment, ref_name, commit_oid`
++  - Keeps latest row by `COALESCE(latest_updated_date, updated_date)` (then `id DESC`)
++  - Runs before deployment conversion.
++- Wired dedup into subtask flow and dependency chain:
++  - collect -> extract -> dedup -> convert
++- `backend/Dockerfile` updates include:
++  - zlib static PIC build from source and linkage adjustments
++  - Poetry installer version pin (`2.2.1`)
++  - base/build stage cleanup and dependency package adjustments
++- Added root `docker-compose.yml` with `mysql`, `grafana`, `devlake`, and `config-ui` services.
++- `grafana/Dockerfile` now sets `GF_PLUGINS_PREINSTALL_DISABLED=true`.
++- `grafana/dashboards/DORADetails-ChangeFailureRate.json` now explicitly filters deployments to `environment in ('PRODUCTION')` in one query block.
++
++### Files
++- `backend/plugins/github_graphql/tasks/deployment_deduper.go`
++- `backend/plugins/github_graphql/impl/impl.go`
++- `backend/plugins/github_graphql/tasks/deployment_convertor.go`
++- `backend/Dockerfile`
++- `docker-compose.yml`
++- `grafana/Dockerfile`
++- `grafana/dashboards/DORADetails-ChangeFailureRate.json`
+diff --git a/backend/Dockerfile b/backend/Dockerfile
+index 69cbeca7a..5c836668a 100644
+--- a/backend/Dockerfile
++++ b/backend/Dockerfile
+@@ -23,15 +23,15 @@
+ #While incubation status is not necessarily a reflection of the completeness or stability of the code,
+ #it does indicate that the project has yet to be fully endorsed by the ASF.
+ 
+-FROM --platform=linux/amd64 debian:bookworm as debian-amd64
++FROM --platform=linux/amd64 debian:bookworm AS debian-amd64
+ RUN apt-get update
+-RUN apt-get install -y libssh2-1-dev libssl-dev zlib1g-dev
++RUN apt-get install -y libssh2-1-dev libssl-dev
+ 
+-FROM --platform=linux/arm64 debian:bookworm as debian-arm64
++FROM --platform=linux/arm64 debian:bookworm AS debian-arm64
+ RUN apt-get update
+-RUN apt-get install -y libssh2-1-dev libssl-dev zlib1g-dev
++RUN apt-get install -y libssh2-1-dev libssl-dev
+ 
+-FROM --platform=$BUILDPLATFORM golang:1.20.5-bookworm as builder
++FROM --platform=$BUILDPLATFORM golang:1.20.5-bookworm AS builder
+ 
+ # docker build --build-arg GOPROXY=https://goproxy.io,direct -t mericodev/lake .
+ ARG GOPROXY=
+@@ -40,7 +40,7 @@ ARG HTTP_PROXY=
+ ARG HTTPS_PROXY=
+ 
+ RUN apt-get update
+-RUN apt-get install -y gcc binutils libfindbin-libs-perl cmake libssh2-1-dev libssl-dev zlib1g-dev
++RUN apt-get install -y gcc binutils libfindbin-libs-perl cmake libssh2-1-dev libssl-dev
+ 
+ RUN if [ "$(arch)" != "aarch64" ] ; then \
+         apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu ; \
+@@ -60,6 +60,26 @@ COPY --from=debian-arm64 /usr/include /rootfs-arm64/usr/include
+ COPY --from=debian-arm64 /usr/lib/aarch64-linux-gnu /rootfs-arm64/usr/lib/aarch64-linux-gnu
+ COPY --from=debian-arm64 /lib/aarch64-linux-gnu /rootfs-arm64/lib/aarch64-linux-gnu
+ 
++# to fix this error: "relocation R_X86_64_PC32 against symbol `z_errmsg' can not be used when making a shared object; recompile with -fPIC"
++# we need to compile zlib from source and make it position independent
++RUN for arch in aarch64 x86_64 ; do \
++        mkdir -p /tmp/build/${arch} && cd /tmp/build/${arch} && \
++        wget https://github.com/madler/zlib/archive/refs/tags/v1.2.13.tar.gz -O - | tar -xz && \
++        cd zlib-1.2.13 && \
++        mkdir build && cd build && \
++        if [ "$arch" = "aarch64" ] ; then \
++            cmake .. -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
++                -DBUILD_SHARED_LIBS=OFF -DCMAKE_SYSROOT=/rootfs-arm64 \
++                -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
++                -DCMAKE_INSTALL_PREFIX=/usr/local/deps/${arch} ; \
++        elif [ "$arch" = "x86_64" ] ; then \
++            cmake .. -DCMAKE_C_COMPILER=x86_64-linux-gnu-gcc \
++                -DBUILD_SHARED_LIBS=OFF -DCMAKE_SYSROOT=/rootfs-amd64 \
++                -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
++                -DCMAKE_INSTALL_PREFIX=/usr/local/deps/${arch} ; \
++        fi && \
++        make -j install ; \
++    done
+ 
+ RUN for arch in aarch64 x86_64 ; do \
+         mkdir -p /tmp/build/${arch} && cd /tmp/build/${arch} && \
+@@ -69,17 +89,19 @@ RUN for arch in aarch64 x86_64 ; do \
+         if [ "$arch" = "aarch64" ] ; then \
+             cmake .. -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
+                 -DBUILD_SHARED_LIBS=ON -DCMAKE_SYSROOT=/rootfs-arm64 \
++                -DZLIB_LIBRARY=/usr/local/deps/${arch}/lib/libz.a \
+                 -DCMAKE_INSTALL_PREFIX=/usr/local/deps/${arch} ; \
+         elif [ "$arch" = "x86_64" ] ; then \
+             cmake .. -DCMAKE_C_COMPILER=x86_64-linux-gnu-gcc \
+                 -DBUILD_SHARED_LIBS=ON -DCMAKE_SYSROOT=/rootfs-amd64 \
++                -DZLIB_LIBRARY=/usr/local/deps/${arch}/lib/libz.a \
+                 -DCMAKE_INSTALL_PREFIX=/usr/local/deps/${arch} ; \
+         fi && \
+         make -j install ; \
+     done
+ 
+ 
+-FROM builder as build
++FROM builder AS build
+ 
+ WORKDIR /app
+ COPY . /app
+@@ -113,7 +135,7 @@ RUN cd /usr/local/deps/target/lib && \
+     done
+ 
+ 
+-FROM python:3.9-slim-bookworm as base
++FROM python:3.9-slim-bookworm AS base
+ 
+ RUN apt-get update && \
+     apt-get install -y python3-dev python3-pip tar pkg-config curl libssh2-1 zlib1g libffi-dev default-libmysqlclient-dev libpq-dev tini git openssh-client corkscrew && \
+@@ -149,14 +171,14 @@ RUN python3 -m pip install --no-cache --upgrade pip setuptools && \
+     python3 -m pip install --upgrade pip
+ 
+ # Setup Python Poetry package manager
+-RUN curl -sSL https://install.python-poetry.org | python3 -
++RUN curl -sSL https://install.python-poetry.org | python3 - --version 2.2.1
+ ENV PATH="$PATH:/app/.local/bin"
+ 
+ # Build Python plugins, make sure the scripts has execute permission
+ # RUN find /app/python/ -name "*.sh" | xargs -I{} chmod +x {}
+ RUN /app/python/build.sh
+ 
+-FROM base as devlake-base
++FROM base AS devlake-base
+ ARG DEBUG=
+ 
+ # libraries
+diff --git a/backend/plugins/github_graphql/impl/impl.go b/backend/plugins/github_graphql/impl/impl.go
+index 31fe0a9b7..3eb5c330e 100644
+--- a/backend/plugins/github_graphql/impl/impl.go
++++ b/backend/plugins/github_graphql/impl/impl.go
+@@ -134,6 +134,7 @@ func (p GithubGraphql) SubTaskMetas() []plugin.SubTaskMeta {
+ 		// deployment
+ 		tasks.CollectDeploymentsMeta,
+ 		tasks.ExtractDeploymentsMeta,
++		tasks.DedupDeploymentsMeta,
+ 		tasks.ConvertDeploymentsMeta,
+ 
+ 		// releases
+diff --git a/backend/plugins/github_graphql/tasks/deployment_convertor.go b/backend/plugins/github_graphql/tasks/deployment_convertor.go
+index ec07c2bb3..84dd22060 100644
+--- a/backend/plugins/github_graphql/tasks/deployment_convertor.go
++++ b/backend/plugins/github_graphql/tasks/deployment_convertor.go
+@@ -42,6 +42,7 @@ var ConvertDeploymentsMeta = plugin.SubTaskMeta{
+ 	EnabledByDefault: true,
+ 	Description:      "Convert tool layer table github_deployments into domain layer table deployment",
+ 	DomainTypes:      []string{plugin.DOMAIN_TYPE_CICD},
++	Dependencies:     []*plugin.SubTaskMeta{&DedupDeploymentsMeta},
+ 	DependencyTables: []string{models.GithubDeployment{}.TableName()},
+ 	ProductTables:    []string{devops.CicdDeploymentCommit{}.TableName(), devops.CICDDeployment{}.TableName()},
+ }
+diff --git a/backend/plugins/github_graphql/tasks/deployment_deduper.go b/backend/plugins/github_graphql/tasks/deployment_deduper.go
+new file mode 100644
+index 000000000..38982f16b
+--- /dev/null
++++ b/backend/plugins/github_graphql/tasks/deployment_deduper.go
+@@ -0,0 +1,68 @@
++/*
++Licensed to the Apache Software Foundation (ASF) under one or more
++contributor license agreements.  See the NOTICE file distributed with
++this work for additional information regarding copyright ownership.
++The ASF licenses this file to You under the Apache License, Version 2.0
++(the "License"); you may not use this file except in compliance with
++the License.  You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package tasks
++
++import (
++	"github.com/apache/incubator-devlake/core/errors"
++	"github.com/apache/incubator-devlake/core/plugin"
++	"github.com/apache/incubator-devlake/plugins/github/models"
++	githubTasks "github.com/apache/incubator-devlake/plugins/github/tasks"
++)
++
++var _ plugin.SubTaskEntryPoint = DedupDeployments
++
++var DedupDeploymentsMeta = plugin.SubTaskMeta{
++	Name:             "Deduplicate Deployments",
++	EntryPoint:       DedupDeployments,
++	EnabledByDefault: true,
++	Description:      "deduplicate github deployments by ref_name and commit_oid, keeping the latest updated row",
++	DomainTypes:      []string{plugin.DOMAIN_TYPE_CICD},
++	Dependencies:     []*plugin.SubTaskMeta{&ExtractDeploymentsMeta},
++	DependencyTables: []string{models.GithubDeployment{}.TableName()},
++	ProductTables:    []string{models.GithubDeployment{}.TableName()},
++}
++
++func DedupDeployments(taskCtx plugin.SubTaskContext) errors.Error {
++	data := taskCtx.GetData().(*githubTasks.GithubTaskData)
++	db := taskCtx.GetDal()
++
++	// Keep the latest row per deployment key for this repo in this run scope.
++	return db.Exec(`
++DELETE FROM _tool_github_deployments
++WHERE (connection_id, id) IN (
++	SELECT connection_id, id
++	FROM (
++		SELECT
++			connection_id,
++			id,
++			ROW_NUMBER() OVER (
++				PARTITION BY connection_id, github_id, environment, ref_name, commit_oid
++				ORDER BY COALESCE(latest_updated_date, updated_date) DESC, id DESC
++			) AS rn
++		FROM _tool_github_deployments
++		WHERE connection_id = ?
++		  AND github_id = ?
++		  AND ref_name IS NOT NULL AND ref_name <> ''
++		  AND commit_oid IS NOT NULL AND commit_oid <> ''
++	) ranked
++	WHERE rn > 1
++);`,
++		data.Options.ConnectionId,
++		data.Options.GithubId,
++	)
++}
+diff --git a/docker-compose.yml b/docker-compose.yml
+new file mode 100644
+index 000000000..56594b079
+--- /dev/null
++++ b/docker-compose.yml
+@@ -0,0 +1,89 @@
++# Licensed to the Apache Software Foundation (ASF) under one or more
++# contributor license agreements.  See the NOTICE file distributed with
++# this work for additional information regarding copyright ownership.
++# The ASF licenses this file to You under the Apache License, Version 2.0
++# (the "License"); you may not use this file except in compliance with
++# the License.  You may obtain a copy of the License at
++#
++#     http://www.apache.org/licenses/LICENSE-2.0
++#
++# Unless required by applicable law or agreed to in writing, software
++# distributed under the License is distributed on an "AS IS" BASIS,
++# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++# See the License for the specific language governing permissions and
++# limitations under the License.
++#
++services:
++  mysql:
++    image: mysql:8
++    volumes:
++      - mysql-storage:/var/lib/mysql
++    restart: always
++    ports:
++      - 3306:3306
++    environment:
++      MYSQL_ROOT_PASSWORD: admin
++      MYSQL_DATABASE: lake
++      MYSQL_USER: merico
++      MYSQL_PASSWORD: merico
++      TZ: UTC
++    command: --character-set-server=utf8mb4
++      --collation-server=utf8mb4_bin
++      --skip-log-bin
++
++  grafana:
++    build:
++      context: ./grafana
++    ports:
++      - 3002:3000
++    volumes:
++      - grafana-storage:/var/lib/grafana
++    environment:
++      GF_SERVER_ROOT_URL: "http://localhost:4000/grafana"
++      GF_USERS_DEFAULT_THEME: "dark"
++      MYSQL_URL: mysql:3306
++      MYSQL_DATABASE: lake
++      MYSQL_USER: merico
++      MYSQL_PASSWORD: merico
++      TZ: UTC
++    restart: always
++    depends_on:
++      - mysql
++
++  devlake:
++    build:
++      context: ./backend
++    #image: devlake.docker.scarf.sh/apache/devlake:v1.0.3-beta8
++    ports:
++      - 8080:8080
++    restart: always
++    volumes:
++      - devlake-log:/app/logs
++    env_file:
++      - ./.env
++    environment:
++      LOGGING_DIR: /app/logs
++      TZ: UTC
++    depends_on:
++      - mysql
++
++  config-ui:
++    build:
++      context: ./config-ui
++    ports:
++      - 4000:4000
++    env_file:
++      - ./.env
++    environment:
++      DEVLAKE_ENDPOINT: devlake:8080
++      GRAFANA_ENDPOINT: grafana:3000
++      TZ: UTC
++      #ADMIN_USER: devlake
++      #ADMIN_PASS: merico
++    depends_on:
++      - devlake
++
++volumes:
++  mysql-storage:
++  grafana-storage:
++  devlake-log:
+diff --git a/grafana/Dockerfile b/grafana/Dockerfile
+index 406e7c9a0..8c5d9d633 100644
+--- a/grafana/Dockerfile
++++ b/grafana/Dockerfile
+@@ -34,6 +34,7 @@ ENV GF_SERVER_SERVE_FROM_SUB_PATH=true
+ ENV GF_DASHBOARDS_JSON_ENABLED=true
+ ENV GF_LIVE_ALLOWED_ORIGINS='*'
+ ENV GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH=/etc/grafana/dashboards/Homepage.json
++ENV GF_PLUGINS_PREINSTALL_DISABLED=true
+ USER root
+ RUN grafana-cli plugins install grafana-piechart-panel
+ RUN chgrp -R 0 /etc/grafana /usr/share/grafana /var/lib/grafana && \
+diff --git a/grafana/dashboards/DORADetails-ChangeFailureRate.json b/grafana/dashboards/DORADetails-ChangeFailureRate.json
+index 8048b282b..05b13fae2 100644
+--- a/grafana/dashboards/DORADetails-ChangeFailureRate.json
++++ b/grafana/dashboards/DORADetails-ChangeFailureRate.json
+@@ -627,7 +627,7 @@
+           "metricColumn": "none",
+           "queryType": "randomWalk",
+           "rawQuery": true,
+-          "rawSql": "with _deployments as(\n  select\n    distinct d.cicd_deployment_id as deployment_id,\n    d.result,\n    d.environment,\n    d.finished_date,\n    d.cicd_scope_id,\n    pm.project_name\n  from\n    cicd_deployment_commits d\n    join project_mapping pm on d.cicd_scope_id = pm.row_id\n    and pm.`table` = 'cicd_scopes'\n  where\n    -- only result needs to specified, not envioronment\n    d.result = 'SUCCESS' -- choose your project_name\n    and pm.project_name in ($project)\n    and $__timeFilter(d.finished_date)\n),\n_incidents as(\n  select\n    distinct i.id as issue_id,\n    i.created_date,\n    pm.project_name\n  from\n    incidents i\n    join project_mapping pm on i.scope_id = pm.row_id\n    and i.`table` = pm.`table`\n  where\n    -- choose your project_name\n    pm.project_name in ($project)\n    and $__timeFilter(i.created_date)\n)\nselect\n  finished_date as 'Time (Ascending)',\n  deployment_id as 'Entity ID',\n  'DEPLOYMENT' as 'Entity Type (Deployment/Incident)'\nfrom\n  _deployments\nunion\nselect\n  created_date as 'Time (Ascending)',\n  issue_id as 'Entity ID',\n  'INCIDENT' as 'Entity Type (Deployment/Incident)'\nfrom\n  _incidents\norder by\n  1",
++          "rawSql": "with _deployments as(\n  select\n    distinct d.cicd_deployment_id as deployment_id,\n    d.result,\n    d.environment,\n    d.finished_date,\n    d.cicd_scope_id,\n    pm.project_name\n  from\n    cicd_deployment_commits d\n    join project_mapping pm on d.cicd_scope_id = pm.row_id\n    and pm.`table` = 'cicd_scopes'\n  where\n    -- only result needs to specified, not envioronment\n    d.result = 'SUCCESS' -- choose your project_name\n    and d.environment in ('PRODUCTION')\n    and pm.project_name in ($project)\n    and $__timeFilter(d.finished_date)\n),\n_incidents as(\n  select\n    distinct i.id as issue_id,\n    i.created_date,\n    pm.project_name\n  from\n    incidents i\n    join project_mapping pm on i.scope_id = pm.row_id\n    and i.`table` = pm.`table`\n  where\n    -- choose your project_name\n    pm.project_name in ($project)\n    and $__timeFilter(i.created_date)\n)\nselect\n  finished_date as 'Time (Ascending)',\n  deployment_id as 'Entity ID',\n  'DEPLOYMENT' as 'Entity Type (Deployment/Incident)'\nfrom\n  _deployments\nunion\nselect\n  created_date as 'Time (Ascending)',\n  issue_id as 'Entity ID',\n  'INCIDENT' as 'Entity Type (Deployment/Incident)'\nfrom\n  _incidents\norder by\n  1",
+           "refId": "A",
+           "select": [
+             [
+@@ -755,4 +755,4 @@
+   "uid": "Change-failure-rate",
+   "version": 3,
+   "weekStart": ""
+-}
+\ No newline at end of file
++}
+-- 
+2.52.0
+
