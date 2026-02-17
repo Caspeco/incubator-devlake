@@ -62,6 +62,10 @@ func ExtractIssues(subtaskCtx plugin.SubTaskContext) errors.Error {
 	if err != nil {
 		return err
 	}
+	timestampFieldMap, err := getTimestampFieldMap(db, connectionId, logger)
+	if err != nil {
+		return err
+	}
 	extractor, err := api.NewStatefulApiExtractor(&api.StatefulApiExtractorArgs[apiv2models.Issue]{
 		SubtaskCommonArgs: &api.SubtaskCommonArgs{
 			SubTaskContext: subtaskCtx,
@@ -71,9 +75,11 @@ func ExtractIssues(subtaskCtx plugin.SubTaskContext) errors.Error {
 				BoardId:      data.Options.BoardId,
 			},
 			SubtaskConfig: map[string]any{
-				"typeMappings":    mappings,
-				"storyPointField": data.Options.ScopeConfig.StoryPointField,
-				"dueDateField":    data.Options.ScopeConfig.DueDateField,
+				"typeMappings":       mappings,
+				"storyPointField":    data.Options.ScopeConfig.StoryPointField,
+				"dueDateField":       data.Options.ScopeConfig.DueDateField,
+				"incidentStartField": data.Options.ScopeConfig.IncidentStartField,
+				"incidentStopField":  data.Options.ScopeConfig.IncidentStopField,
 			},
 		},
 		BeforeExtract: func(apiIssue *apiv2models.Issue, stateManager *api.SubtaskStateManager) errors.Error {
@@ -96,7 +102,7 @@ func ExtractIssues(subtaskCtx plugin.SubTaskContext) errors.Error {
 			return nil
 		},
 		Extract: func(apiIssue *apiv2models.Issue, row *api.RawData) ([]interface{}, errors.Error) {
-			return extractIssues(data, mappings, apiIssue, row, userFieldMap)
+			return extractIssues(data, mappings, apiIssue, row, userFieldMap, timestampFieldMap)
 		},
 	})
 	if err != nil {
@@ -105,7 +111,7 @@ func ExtractIssues(subtaskCtx plugin.SubTaskContext) errors.Error {
 	return extractor.Execute()
 }
 
-func extractIssues(data *JiraTaskData, mappings *typeMappings, apiIssue *apiv2models.Issue, row *api.RawData, userFieldMaps map[string]struct{}) ([]interface{}, errors.Error) {
+func extractIssues(data *JiraTaskData, mappings *typeMappings, apiIssue *apiv2models.Issue, row *api.RawData, userFieldMaps map[string]struct{}, timestampFieldMap map[string]struct{}) ([]interface{}, errors.Error) {
 	err := apiIssue.SetAllFields(row.Data)
 	if err != nil {
 		return nil, err
@@ -116,6 +122,11 @@ func extractIssues(data *JiraTaskData, mappings *typeMappings, apiIssue *apiv2mo
 		return results, nil
 	}
 	sprints, issue, comments, worklogs, changelogs, changelogItems, users := apiIssue.ExtractEntities(data.Options.ConnectionId, userFieldMaps)
+	if shouldOverrideIncidentTimestamps(issue.Type, mappings) {
+		incidentStart, incidentStop := resolveIncidentDuration(issue.Created, issue.ResolutionDate, apiIssue.Fields.AllFields, data.Options.ScopeConfig, timestampFieldMap)
+		issue.Created = incidentStart
+		issue.ResolutionDate = incidentStop
+	}
 	for _, sprintId := range sprints {
 		sprintIssue := &models.JiraSprintIssue{
 			ConnectionId:     data.Options.ConnectionId,
@@ -126,10 +137,7 @@ func extractIssues(data *JiraTaskData, mappings *typeMappings, apiIssue *apiv2mo
 		}
 		results = append(results, sprintIssue)
 	}
-	if issue.ResolutionDate != nil {
-		temp := uint(issue.ResolutionDate.Unix()-issue.Created.Unix()) / 60
-		issue.LeadTimeMinutes = &temp
-	}
+	issue.LeadTimeMinutes = calculateLeadTimeMinutes(issue.Created, issue.ResolutionDate)
 	if data.Options.ScopeConfig != nil && data.Options.ScopeConfig.StoryPointField != "" {
 		unknownStoryPoint := apiIssue.Fields.AllFields[data.Options.ScopeConfig.StoryPointField]
 		switch sp := unknownStoryPoint.(type) {
@@ -277,4 +285,50 @@ func getTypeMappings(data *JiraTaskData, db dal.Dal) (*typeMappings, errors.Erro
 		StdTypeMappings:        stdTypeMappings,
 		StandardStatusMappings: standardStatusMappings,
 	}, nil
+}
+
+func isConfiguredTimestampField(fieldName string, timestampFieldMap map[string]struct{}) bool {
+	if len(timestampFieldMap) == 0 {
+		return false
+	}
+	_, ok := timestampFieldMap[fieldName]
+	return ok
+}
+
+func shouldOverrideIncidentTimestamps(issueTypeID string, mappings *typeMappings) bool {
+	if mappings == nil {
+		return false
+	}
+	issueType := mappings.TypeIdMappings[issueTypeID]
+	stdType := mappings.StdTypeMappings[issueType]
+	if stdType == "" {
+		stdType = strings.ToUpper(issueType)
+	}
+	return stdType == "INCIDENT"
+}
+
+func resolveIncidentDuration(issueCreated time.Time, issueResolutionDate *time.Time, allFields map[string]interface{}, scopeConfig *models.JiraScopeConfig, timestampFieldMap map[string]struct{}) (time.Time, *time.Time) {
+	incidentStart := issueCreated
+	incidentStop := issueResolutionDate
+	if scopeConfig == nil {
+		return incidentStart, incidentStop
+	}
+	loc := issueCreated.Location()
+	if scopeConfig.IncidentStartField != "" && isConfiguredTimestampField(scopeConfig.IncidentStartField, timestampFieldMap) {
+		if t, _ := utils.GetTimeFieldFromMap(allFields, scopeConfig.IncidentStartField, loc); t != nil {
+			incidentStart = *t
+		}
+	}
+	if scopeConfig.IncidentStopField != "" && isConfiguredTimestampField(scopeConfig.IncidentStopField, timestampFieldMap) {
+		incidentStop, _ = utils.GetTimeFieldFromMap(allFields, scopeConfig.IncidentStopField, loc)
+	}
+	return incidentStart, incidentStop
+}
+
+func calculateLeadTimeMinutes(start time.Time, stop *time.Time) *uint {
+	if stop == nil || stop.Before(start) {
+		return nil
+	}
+	temp := uint(stop.Unix()-start.Unix()) / 60
+	return &temp
 }
