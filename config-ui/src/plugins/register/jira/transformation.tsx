@@ -57,6 +57,9 @@ export const JiraTransformation = ({ entities, connectionId, transformation, set
     fields: Array<{
       id: string;
       name: string;
+      schema?: {
+        type?: string;
+      };
     }>;
   }>(async () => {
     if (!prefix) {
@@ -91,6 +94,14 @@ export const JiraTransformation = ({ entities, connectionId, transformation, set
   }
 
   const { issueTypes, fields } = data;
+  const getFieldType = (field: any) =>
+    String(field?.schema?.type ?? field?.schemaType ?? field?.schema_type ?? '').toLowerCase();
+  const isTimestampField = (field: any) => {
+    const fieldType = getFieldType(field);
+    return fieldType === 'date' || fieldType === 'datetime';
+  };
+  const timestampFields = fields.filter((it) => isTimestampField(it));
+  const timestampFieldIds = new Set(timestampFields.map((it) => it.id));
 
   const transformaType = (its: string[], standardType: StandardType) => {
     return its.reduce((acc, cur) => {
@@ -123,9 +134,11 @@ export const JiraTransformation = ({ entities, connectionId, transformation, set
         connectionId,
         issueTypes,
         fields,
+        timestampFields,
         requirements,
         bugs,
         incidents,
+        timestampFieldIds,
         transformaType,
       })}
     />
@@ -140,9 +153,11 @@ const renderCollapseItems = ({
   connectionId,
   issueTypes,
   fields,
+  timestampFields,
   requirements,
   bugs,
   incidents,
+  timestampFieldIds,
   transformaType,
 }: {
   entities: string[];
@@ -157,10 +172,21 @@ const renderCollapseItems = ({
   fields: Array<{
     id: string;
     name: string;
+    schema?: {
+      type?: string;
+    };
+  }>;
+  timestampFields: Array<{
+    id: string;
+    name: string;
+    schema?: {
+      type?: string;
+    };
   }>;
   requirements: string[];
   bugs: string[];
   incidents: string[];
+  timestampFieldIds: Set<string>;
   transformaType: any;
 }) =>
   [
@@ -261,6 +287,56 @@ const renderCollapseItems = ({
                 onChangeTransformation({
                   ...transformation,
                   storyPointField: value,
+                })
+              }
+            />
+          </Form.Item>
+          <Form.Item
+            label={
+              <>
+                <span>Incident Start</span>
+                <HelpTooltip content="Choose the issue field used as incident start timestamp. Only Jira Date/DateTime fields are supported. Defaults to Jira `Created` if not set." />
+              </>
+            }
+          >
+            <Select
+              allowClear
+              showSearch
+              options={timestampFields.map((it) => ({ label: it.name, value: it.id }))}
+              optionFilterProp="children"
+              filterOption={(input: string, option?: { label: string; value: string }) =>
+                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+              }
+              value={transformation.incidentStartField}
+              onChange={(value) =>
+                onChangeTransformation({
+                  ...transformation,
+                  incidentStartField: value && timestampFieldIds.has(value) ? value : '',
+                })
+              }
+            />
+          </Form.Item>
+          <Form.Item
+            label={
+              <>
+                <span>Incident Stop</span>
+                <HelpTooltip content="Choose the issue field used as incident stop timestamp. Only Jira Date/DateTime fields are supported. Defaults to Jira `Resolution Date` if not set." />
+              </>
+            }
+          >
+            <Select
+              allowClear
+              showSearch
+              options={timestampFields.map((it) => ({ label: it.name, value: it.id }))}
+              optionFilterProp="children"
+              filterOption={(input: string, option?: { label: string; value: string }) =>
+                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+              }
+              value={transformation.incidentStopField}
+              onChange={(value) =>
+                onChangeTransformation({
+                  ...transformation,
+                  incidentStopField: value && timestampFieldIds.has(value) ? value : '',
                 })
               }
             />

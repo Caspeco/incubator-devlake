@@ -49,6 +49,8 @@ type JiraScopeConfig struct {
 	TypeMappings               map[string]TypeMapping `mapstructure:"typeMappings,omitempty" json:"typeMappings" gorm:"type:json;serializer:json"`
 	ApplicationType            string                 `mapstructure:"applicationType,omitempty" json:"applicationType" gorm:"type:varchar(255)"`
 	DueDateField               string                 `mapstructure:"dueDateField,omitempty" json:"dueDateField" gorm:"type:varchar(255)"`
+	IncidentStartField         string                 `mapstructure:"incidentStartField,omitempty" json:"incidentStartField" gorm:"type:varchar(255)"`
+	IncidentStopField          string                 `mapstructure:"incidentStopField,omitempty" json:"incidentStopField" gorm:"type:varchar(255)"`
 }
 
 func (r *JiraScopeConfig) SetConnectionId(c *JiraScopeConfig, connectionId uint64) {

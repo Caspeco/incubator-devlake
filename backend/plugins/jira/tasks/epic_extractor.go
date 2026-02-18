@@ -87,7 +87,7 @@ func ExtractEpics(subtaskCtx plugin.SubTaskContext) errors.Error {
 			return nil
 		},
 		Extract: func(apiIssue *apiv2models.Issue, row *api.RawData) ([]interface{}, errors.Error) {
-			return extractIssues(data, mappings, apiIssue, row, userFieldMap)
+			return extractIssues(data, mappings, apiIssue, row, userFieldMap, nil)
 		},
 	})
 	if err != nil {
