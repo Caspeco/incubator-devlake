@@ -18,8 +18,6 @@ limitations under the License.
 package tasks
 
 import (
-	"strings"
-
 	"github.com/apache/incubator-devlake/core/dal"
 	"github.com/apache/incubator-devlake/core/errors"
 	"github.com/apache/incubator-devlake/core/log"
@@ -54,10 +52,6 @@ func ExtractEpics(subtaskCtx plugin.SubTaskContext) errors.Error {
 	if err != nil {
 		return err
 	}
-	timestampFieldMap, err := getTimestampFieldMap(db, connectionId, logger)
-	if err != nil {
-		return err
-	}
 
 	extractor, err := api.NewStatefulApiExtractor(&api.StatefulApiExtractorArgs[apiv2models.Issue]{
 		SubtaskCommonArgs: &api.SubtaskCommonArgs{
@@ -68,11 +62,9 @@ func ExtractEpics(subtaskCtx plugin.SubTaskContext) errors.Error {
 				BoardId:      data.Options.BoardId,
 			},
 			SubtaskConfig: map[string]any{
-				"typeMappings":       mappings,
-				"storyPointField":    data.Options.ScopeConfig.StoryPointField,
-				"dueDateField":       data.Options.ScopeConfig.DueDateField,
-				"incidentStartField": data.Options.ScopeConfig.IncidentStartField,
-				"incidentStopField":  data.Options.ScopeConfig.IncidentStopField,
+				"typeMappings":    mappings,
+				"storyPointField": data.Options.ScopeConfig.StoryPointField,
+				"dueDateField":    data.Options.ScopeConfig.DueDateField,
 			},
 		},
 		BeforeExtract: func(apiIssue *apiv2models.Issue, stateManager *api.SubtaskStateManager) errors.Error {
@@ -95,7 +87,7 @@ func ExtractEpics(subtaskCtx plugin.SubTaskContext) errors.Error {
 			return nil
 		},
 		Extract: func(apiIssue *apiv2models.Issue, row *api.RawData) ([]interface{}, errors.Error) {
-			return extractIssues(data, mappings, apiIssue, row, userFieldMap, timestampFieldMap)
+			return extractIssues(data, mappings, apiIssue, row, userFieldMap, nil)
 		},
 	})
 	if err != nil {
@@ -135,33 +127,4 @@ func getUserFieldMap(db dal.Dal, connectionId uint64, logger log.Logger) (map[st
 		}
 	}
 	return userFieldMap, nil
-}
-
-func getTimestampFieldMap(db dal.Dal, connectionId uint64, logger log.Logger) (map[string]struct{}, errors.Error) {
-	timestampFieldMap := make(map[string]struct{})
-	issueFieldMap, err := getIssueFieldMap(db, connectionId, logger)
-	if err != nil {
-		return nil, err
-	}
-	for _, issueField := range issueFieldMap {
-		if !isTimestampFieldType(issueField.SchemaType) {
-			continue
-		}
-		if issueField.ID != "" {
-			timestampFieldMap[issueField.ID] = struct{}{}
-		}
-		if issueField.Name != "" {
-			timestampFieldMap[issueField.Name] = struct{}{}
-		}
-	}
-	return timestampFieldMap, nil
-}
-
-func isTimestampFieldType(schemaType string) bool {
-	switch strings.ToLower(schemaType) {
-	case "date", "datetime":
-		return true
-	default:
-		return false
-	}
 }

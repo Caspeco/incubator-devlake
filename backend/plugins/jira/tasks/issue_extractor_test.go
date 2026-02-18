@@ -25,6 +25,7 @@ import (
 )
 
 func TestIsConfiguredTimestampField(t *testing.T) {
+	// Verifies configured incident fields are accepted only when present in the timestamp field map.
 	fieldMap := map[string]struct{}{
 		"customfield_10001": {},
 	}
@@ -40,7 +41,31 @@ func TestIsConfiguredTimestampField(t *testing.T) {
 	}
 }
 
+func TestIsTimestampFieldType(t *testing.T) {
+	// Verifies only date/datetime Jira schema types are treated as timestamp fields.
+	tests := []struct {
+		name       string
+		schemaType string
+		want       bool
+	}{
+		{name: "date", schemaType: "date", want: true},
+		{name: "datetime", schemaType: "datetime", want: true},
+		{name: "upper datetime", schemaType: "DateTime", want: true},
+		{name: "string", schemaType: "string", want: false},
+		{name: "number", schemaType: "number", want: false},
+		{name: "empty", schemaType: "", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isTimestampFieldType(tt.schemaType); got != tt.want {
+				t.Fatalf("isTimestampFieldType(%q) = %v, want %v", tt.schemaType, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestResolveIncidentDuration_CustomFields(t *testing.T) {
+	// Verifies custom incident start/stop fields override default created/resolution timestamps.
 	created := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	defaultStop := time.Date(2025, 1, 1, 3, 0, 0, 0, time.UTC)
 
@@ -69,6 +94,7 @@ func TestResolveIncidentDuration_CustomFields(t *testing.T) {
 }
 
 func TestResolveIncidentDuration_NonTimestampConfiguredFieldsFallback(t *testing.T) {
+	// Verifies non-timestamp configured fields are ignored and defaults are kept.
 	created := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	defaultStop := time.Date(2025, 1, 1, 3, 0, 0, 0, time.UTC)
 
@@ -92,6 +118,7 @@ func TestResolveIncidentDuration_NonTimestampConfiguredFieldsFallback(t *testing
 }
 
 func TestCalculateLeadTimeMinutes(t *testing.T) {
+	// Verifies lead time is computed only for valid stop timestamps (non-nil and not before start).
 	start := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	t.Run("normal", func(t *testing.T) {
@@ -119,6 +146,7 @@ func TestCalculateLeadTimeMinutes(t *testing.T) {
 }
 
 func TestShouldOverrideIncidentTimestamps(t *testing.T) {
+	// Verifies timestamp override applies only to issue types mapped to INCIDENT.
 	mappings := &typeMappings{
 		TypeIdMappings: map[string]string{
 			"10001": "Incident",

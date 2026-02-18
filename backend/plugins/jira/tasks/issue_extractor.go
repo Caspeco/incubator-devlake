@@ -24,6 +24,7 @@ import (
 
 	"github.com/apache/incubator-devlake/core/dal"
 	"github.com/apache/incubator-devlake/core/errors"
+	"github.com/apache/incubator-devlake/core/log"
 	"github.com/apache/incubator-devlake/core/plugin"
 	"github.com/apache/incubator-devlake/helpers/pluginhelper/api"
 	"github.com/apache/incubator-devlake/helpers/utils"
@@ -293,6 +294,35 @@ func isConfiguredTimestampField(fieldName string, timestampFieldMap map[string]s
 	}
 	_, ok := timestampFieldMap[fieldName]
 	return ok
+}
+
+func getTimestampFieldMap(db dal.Dal, connectionId uint64, logger log.Logger) (map[string]struct{}, errors.Error) {
+	timestampFieldMap := make(map[string]struct{})
+	issueFieldMap, err := getIssueFieldMap(db, connectionId, logger)
+	if err != nil {
+		return nil, err
+	}
+	for _, issueField := range issueFieldMap {
+		if !isTimestampFieldType(issueField.SchemaType) {
+			continue
+		}
+		if issueField.ID != "" {
+			timestampFieldMap[issueField.ID] = struct{}{}
+		}
+		if issueField.Name != "" {
+			timestampFieldMap[issueField.Name] = struct{}{}
+		}
+	}
+	return timestampFieldMap, nil
+}
+
+func isTimestampFieldType(schemaType string) bool {
+	switch strings.ToLower(schemaType) {
+	case "date", "datetime":
+		return true
+	default:
+		return false
+	}
 }
 
 func shouldOverrideIncidentTimestamps(issueTypeID string, mappings *typeMappings) bool {

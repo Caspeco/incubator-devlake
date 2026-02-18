@@ -20,6 +20,7 @@ package models
 import "testing"
 
 func TestJiraScopeConfig_TableName(t *testing.T) {
+	// Verifies Jira scope configs are mapped to the expected tool-layer table.
 	var c JiraScopeConfig
 	if got := c.TableName(); got != "_tool_jira_scope_configs" {
 		t.Fatalf("TableName() = %s, want %s", got, "_tool_jira_scope_configs")
@@ -27,6 +28,7 @@ func TestJiraScopeConfig_TableName(t *testing.T) {
 }
 
 func TestJiraScopeConfig_ValidateWithIncidentFields(t *testing.T) {
+	// Verifies incident start/stop field config is accepted by Validate().
 	c := &JiraScopeConfig{
 		IncidentStartField: "customfield_10001",
 		IncidentStopField:  "customfield_10002",
@@ -37,6 +39,7 @@ func TestJiraScopeConfig_ValidateWithIncidentFields(t *testing.T) {
 }
 
 func TestJiraScopeConfig_ValidateInvalidRemotelinkPattern(t *testing.T) {
+	// Verifies invalid remotelink regex is still rejected even with incident fields set.
 	c := &JiraScopeConfig{
 		RemotelinkCommitShaPattern: "(",
 		IncidentStartField:         "customfield_10001",
