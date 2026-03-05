@@ -57,6 +57,5 @@ func All() []plugin.MigrationScript {
 		new(addIndexToGithubJobs),
 		new(addLatestStatusUpdateDateToDeployment),
 		new(addConvertGithubDeploymentToScopeConfigs),
-		new(addPrTitlePrefixTeamMappingsToScopeConfigs),
 	}
 }
