@@ -37,6 +37,12 @@ import { CircleCITransformation } from '@/plugins/register/circleci';
 import { DOC_URL } from '@/release';
 import { operator } from '@/utils';
 
+const normalizePrTitlePrefix = (value: string) => {
+  const normalized = (value ?? '').trim().toUpperCase();
+  if (!normalized) return '';
+  return normalized.split('-')[0].replace(/[^A-Z]/g, '');
+};
+
 interface Props {
   plugin: string;
   connectionId: ID;
@@ -99,11 +105,27 @@ export const ScopeConfigForm = ({
   };
 
   const handleSubmit = async () => {
+    const payload = { name, entities, ...transformation };
+    if (plugin === 'github') {
+      const enabled = !!payload.mapPrsToTeamsByTitlePrefix;
+      const mappings = ((payload.prTitlePrefixTeamMappings ?? []) as Array<{ prefix?: string; team?: string }>)
+        .map((it) => ({
+          prefix: normalizePrTitlePrefix(it.prefix ?? ''),
+          team: (it.team ?? '').trim(),
+        }))
+        .filter((it) => it.prefix || it.team);
+      if (enabled) {
+        console.info('[GitHub] PR title prefix -> team mappings:', mappings);
+      }
+      delete payload.mapPrsToTeamsByTitlePrefix;
+      delete payload.prTitlePrefixTeamMappings;
+    }
+
     const [success, res] = await operator(
       () =>
         !scopeConfigId || forceCreate
-          ? API.scopeConfig.create(plugin, connectionId, { name, entities, ...transformation })
-          : API.scopeConfig.update(plugin, connectionId, scopeConfigId, { name, entities, ...transformation }),
+          ? API.scopeConfig.create(plugin, connectionId, payload)
+          : API.scopeConfig.update(plugin, connectionId, scopeConfigId, payload),
       {
         setOperating,
         hideToast: true,

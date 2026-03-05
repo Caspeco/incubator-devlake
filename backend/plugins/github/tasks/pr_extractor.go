@@ -85,6 +85,7 @@ type GithubApiPullRequest struct {
 
 func ExtractApiPullRequests(taskCtx plugin.SubTaskContext) errors.Error {
 	data := taskCtx.GetData().(*GithubTaskData)
+	logger := taskCtx.GetLogger()
 	config := data.Options.ScopeConfig
 	var labelTypeRegex *regexp.Regexp
 	var labelComponentRegex *regexp.Regexp
@@ -130,6 +131,9 @@ func ExtractApiPullRequests(taskCtx plugin.SubTaskContext) errors.Error {
 			results := make([]interface{}, 0, 1)
 			if rawL.GithubId == 0 {
 				return nil, nil
+			}
+			if teamKey, ok := ExtractTeamKeyFromPrTitle(rawL.Title); ok {
+				logger.Info("found team-assignable github PR repo=%s pr=%d teamKey=%s title=%q", data.Options.Name, rawL.Number, teamKey, rawL.Title)
 			}
 			//If this is a pr, ignore
 			githubPr, err := convertGithubPullRequest(rawL, data.Options.ConnectionId, data.Options.GithubId)

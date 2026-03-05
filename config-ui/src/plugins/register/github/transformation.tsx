@@ -24,6 +24,12 @@ import { theme, Form, Collapse, Input, Tag, Checkbox } from 'antd';
 import { HelpTooltip, ExternalLink } from '@/components';
 import { DOC_URL } from '@/release';
 
+const normalizePrTitlePrefix = (value: string) => {
+  const normalized = (value ?? '').trim().toUpperCase();
+  if (!normalized) return '';
+  return normalized.split('-')[0].replace(/[^A-Z]/g, '');
+};
+
 interface Props {
   entities: string[];
   transformation: any;
@@ -309,6 +315,87 @@ const renderCollapseItems = ({
       ),
     },
     {
+      key: 'TEAMMAPPING',
+      label: 'Team Mapping',
+      style: panelStyle,
+      children: (
+        <>
+          {(() => {
+            const currentMappings = transformation.prTitlePrefixTeamMappings ?? [];
+            const hasInputOnLastRow = currentMappings.length
+              ? !!(
+                  currentMappings[currentMappings.length - 1]?.prefix ||
+                  currentMappings[currentMappings.length - 1]?.team
+                )
+              : false;
+            const mappingRows = !(transformation.mapPrsToTeamsByTitlePrefix ?? false)
+              ? []
+              : currentMappings.length === 0
+              ? [{ prefix: '', team: '' }]
+              : hasInputOnLastRow
+              ? [...currentMappings, { prefix: '', team: '' }]
+              : currentMappings;
+
+            const handleToggleEnabled = (checked: boolean) => {
+              onChangeTransformation({
+                ...transformation,
+                mapPrsToTeamsByTitlePrefix: checked,
+                prTitlePrefixTeamMappings:
+                  checked && currentMappings.length === 0 ? [{ prefix: '', team: '' }] : currentMappings,
+              });
+            };
+
+            const handleChangeMapping = (index: number, key: 'prefix' | 'team', value: string) => {
+              const next = [...currentMappings];
+              const normalizedValue = key === 'prefix' ? normalizePrTitlePrefix(value) : value;
+              next[index] = { ...(next[index] ?? { prefix: '', team: '' }), [key]: normalizedValue };
+              onChangeTransformation({
+                ...transformation,
+                prTitlePrefixTeamMappings: next,
+              });
+            };
+
+            return (
+              <>
+                <Checkbox
+                  checked={transformation.mapPrsToTeamsByTitlePrefix ?? false}
+                  onChange={(e) => handleToggleEnabled(e.target.checked)}
+                >
+                  Map PR&apos;s to teams based on title prefix
+                </Checkbox>
+                <p style={{ margin: '8px 0 0 28px' }}>
+                  Enter only the prefix part (before the hyphen). Example: input <strong>ABC</strong> will match PR
+                  titles starting with <strong>ABC-123 </strong>.
+                </p>
+                {(transformation.mapPrsToTeamsByTitlePrefix ?? false) && (
+                  <div style={{ margin: '12px 0 0', paddingLeft: 28 }}>
+                    {mappingRows.map((row: any, index: number) => (
+                      <div key={index} style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
+                        <Input
+                          style={{ width: 220 }}
+                          placeholder="ABC"
+                          addonAfter="-123"
+                          value={normalizePrTitlePrefix(row.prefix ?? '')}
+                          onChange={(e) => handleChangeMapping(index, 'prefix', e.target.value)}
+                        />
+                        <span style={{ margin: '0 8px' }}>{'->'}</span>
+                        <Input
+                          style={{ width: 220 }}
+                          placeholder="Team Name"
+                          value={row.team ?? ''}
+                          onChange={(e) => handleChangeMapping(index, 'team', e.target.value)}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            );
+          })()}
+        </>
+      ),
+    },
+    {
       key: 'CODEREVIEW',
       label: 'Code Review',
       style: panelStyle,
@@ -454,4 +541,4 @@ const renderCollapseItems = ({
         </>
       ),
     },
-  ].filter((it) => entities.includes(it.key) || it.key === 'ADDITIONAL');
+  ].filter((it) => entities.includes(it.key) || it.key === 'ADDITIONAL' || it.key === 'TEAMMAPPING');

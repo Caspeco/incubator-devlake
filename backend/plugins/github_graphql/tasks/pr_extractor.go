@@ -40,6 +40,7 @@ var ExtractPrsMeta = plugin.SubTaskMeta{
 
 func ExtractPrs(taskCtx plugin.SubTaskContext) errors.Error {
 	data := taskCtx.GetData().(*githubTasks.GithubTaskData)
+	logger := taskCtx.GetLogger()
 	config := data.Options.ScopeConfig
 	var labelTypeRegex *regexp.Regexp
 	var labelComponentRegex *regexp.Regexp
@@ -74,6 +75,9 @@ func ExtractPrs(taskCtx plugin.SubTaskContext) errors.Error {
 			}
 
 			results := make([]interface{}, 0, 1)
+			if teamKey, ok := githubTasks.ExtractTeamKeyFromPrTitle(rawL.Title); ok {
+				logger.Info("found team-assignable github PR repo=%s pr=%d teamKey=%s title=%q", data.Options.Name, rawL.Number, teamKey, rawL.Title)
+			}
 			githubPr, err := convertGithubPullRequest(rawL, data.Options.ConnectionId, data.Options.GithubId)
 			if err != nil {
 				return nil, err
