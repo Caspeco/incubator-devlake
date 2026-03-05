@@ -52,6 +52,9 @@ var ConvertDeploymentsMeta = plugin.SubTaskMeta{
 func ConvertDeployment(taskCtx plugin.SubTaskContext) errors.Error {
 	db := taskCtx.GetDal()
 	rawDataSubTaskArgs, data := CreateRawDataSubTaskArgs(taskCtx, RAW_DEPLOYMENT_TABLE)
+	if !data.Options.ScopeConfig.IsConvertGithubDeploymentEnabled() {
+		return nil
+	}
 	cursor, err := db.Cursor(
 		dal.From(&models.GithubDeployment{}),
 		dal.Where("connection_id = ? and github_id = ?", data.Options.ConnectionId, data.Options.GithubId),

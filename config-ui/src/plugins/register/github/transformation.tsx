@@ -240,7 +240,15 @@ const renderCollapseItems = ({
             Use Regular Expression to define Deployments in DevLake in order to measure DORA metrics.{' '}
             <ExternalLink link={DOC_URL.PLUGIN.GITHUB.TRANSFORMATION}>Learn more</ExternalLink>
           </p>
-          <Checkbox disabled checked>
+          <Checkbox
+            checked={transformation.convertGithubDeployment ?? true}
+            onChange={(e) =>
+              onChangeTransformation({
+                ...transformation,
+                convertGithubDeployment: e.target.checked,
+              })
+            }
+          >
             Convert a GitHub Deployment to a DevLake Deployment
           </Checkbox>
           <div style={{ margin: '8px 0', paddingLeft: 28 }}>
@@ -248,7 +256,8 @@ const renderCollapseItems = ({
             <Input
               style={{ width: 180, margin: '0 8px' }}
               placeholder="(?i)prod(.*)"
-              value={transformation.envNamePattern}
+              disabled={!(transformation.convertGithubDeployment ?? true)}
+              value={transformation.envNamePattern ?? ''}
               onChange={(e) =>
                 onChangeTransformation({
                   ...transformation,
