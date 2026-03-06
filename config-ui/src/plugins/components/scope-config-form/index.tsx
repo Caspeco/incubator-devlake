@@ -43,6 +43,21 @@ const normalizePrTitlePrefix = (value: string) => {
   return normalized.split('-')[0].replace(/[^A-Z]/g, '');
 };
 
+const parsePrTitlePrefixTeamMappings = (value: unknown) => {
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (typeof value !== 'string' || !value.trim()) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+
 interface Props {
   plugin: string;
   connectionId: ID;
@@ -91,7 +106,14 @@ export const ScopeConfigForm = ({
         const res = await API.scopeConfig.get(plugin, connectionId, scopeConfigId);
         setName(forceCreate ? `${res.name}-copy` : res.name);
         setEntities(res.entities ?? []);
-        setTransformation(omit(res, ['id', 'connectionId', 'name', 'entities', 'createdAt', 'updatedAt']));
+        const nextTransformation = omit(res, ['id', 'connectionId', 'name', 'entities', 'createdAt', 'updatedAt']);
+        if (plugin === 'github') {
+          const mappings = parsePrTitlePrefixTeamMappings(nextTransformation.prTitlePrefixTeamMappings);
+          nextTransformation.prTitlePrefixTeamMappings = mappings;
+          nextTransformation.mapPrsToTeamsByTitlePrefix =
+            nextTransformation.mapPrsToTeamsByTitlePrefix ?? mappings.length > 0;
+        }
+        setTransformation(nextTransformation);
       } catch {}
     })();
   }, [scopeConfigId]);
@@ -118,7 +140,7 @@ export const ScopeConfigForm = ({
         console.info('[GitHub] PR title prefix -> team mappings:', mappings);
       }
       delete payload.mapPrsToTeamsByTitlePrefix;
-      delete payload.prTitlePrefixTeamMappings;
+      payload.prTitlePrefixTeamMappings = JSON.stringify(enabled ? mappings : []);
     }
 
     const [success, res] = await operator(
