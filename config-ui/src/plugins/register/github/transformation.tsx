@@ -505,6 +505,19 @@ const renderCollapseItems = ({
             version-based metrics
             <HelpTooltip content="Calculate the commits diff between two consecutive tags that match the following RegEx. Issues closed by PRs which contain these commits will also be calculated. The result will be shown in table.refs_commits_diffs and table.refs_issues_diffs." />
           </p>
+          <Form.Item>
+            <Checkbox
+              checked={transformation.autodetectCherryPickedPrs ?? false}
+              onChange={(e) =>
+                onChangeTransformation({
+                  ...transformation,
+                  autodetectCherryPickedPrs: e.target.checked,
+                })
+              }
+            >
+              Autodetect cherry-picked PRs
+            </Checkbox>
+          </Form.Item>
           <div className="refdiff">
             Compare the last
             <Input

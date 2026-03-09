@@ -29,6 +29,7 @@ import (
 	"github.com/apache/incubator-devlake/core/models/domainlayer/devops"
 	"github.com/apache/incubator-devlake/core/plugin"
 	"github.com/apache/incubator-devlake/helpers/pluginhelper/api"
+	"github.com/apache/incubator-devlake/plugins/dora/models"
 )
 
 // CalculateChangeLeadTimeMeta contains metadata for the CalculateChangeLeadTime subtask.
@@ -221,6 +222,32 @@ func getDeploymentCommit(mergeSha string, projectName string, db dal.Dal) (*devo
 		dal.Where("dc.prev_success_deployment_commit_id <> ''"),
 		dal.Where("dc.environment = 'PRODUCTION'"), // TODO: remove this when multi-environment is supported
 		dal.Where("pm.project_name = ? AND cd.commit_sha = ? AND dc.RESULT = ?", projectName, mergeSha, devops.RESULT_SUCCESS),
+		dal.Orderby("dc.started_date, dc.id ASC"),
+		dal.Limit(1),
+	)
+	if err != nil {
+		return nil, err
+	}
+	if len(deploymentCommits) == 0 {
+		return getDeploymentCommitByAutodetectedPr(mergeSha, projectName, db)
+	}
+	return deploymentCommits[0], nil
+}
+
+func getDeploymentCommitByAutodetectedPr(mergeSha string, projectName string, db dal.Dal) (*devops.CicdDeploymentCommit, errors.Error) {
+	deploymentCommits := make([]*devops.CicdDeploymentCommit, 0, 1)
+	err := db.All(
+		&deploymentCommits,
+		dal.Select("dc.*"),
+		dal.From(models.DeploymentCommitPullRequest{}.TableName()+" dpr"),
+		dal.Join("INNER JOIN pull_requests pr ON (pr.id = dpr.pull_request_id)"),
+		dal.Join("INNER JOIN cicd_deployment_commits dc ON (dc.id = dpr.deployment_commit_id)"),
+		dal.Join("LEFT JOIN project_mapping pm ON (pm.table = 'cicd_scopes' AND pm.row_id = dc.cicd_scope_id)"),
+		dal.Where("dpr.project_name = ?", projectName),
+		dal.Where("pm.project_name = ? AND pr.merge_commit_sha = ?", projectName, mergeSha),
+		dal.Where("dc.prev_success_deployment_commit_id <> ''"),
+		dal.Where("dc.environment = 'PRODUCTION'"),
+		dal.Where("dc.result = ?", devops.RESULT_SUCCESS),
 		dal.Orderby("dc.started_date, dc.id ASC"),
 		dal.Limit(1),
 	)

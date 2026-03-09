@@ -42,6 +42,8 @@ type GithubScopeConfig struct {
 	PrTitlePrefixTeamMappings string            `mapstructure:"prTitlePrefixTeamMappings,omitempty" json:"prTitlePrefixTeamMappings" gorm:"type:text"`
 	ConvertGithubDeployment   *bool             `mapstructure:"convertGithubDeployment,omitempty" json:"convertGithubDeployment" gorm:"type:boolean"`
 	Refdiff                   datatypes.JSONMap `mapstructure:"refdiff,omitempty" json:"refdiff" swaggertype:"object" format:"json"`
+	AutodetectCherryPickedPrs bool              `mapstructure:"autodetectCherryPickedPrs,omitempty" json:"autodetectCherryPickedPrs"`
+	Refdiff                   datatypes.JSONMap `mapstructure:"refdiff,omitempty" json:"refdiff" swaggertype:"object" format:"json"`
 }
 
 func (sc *GithubScopeConfig) IsConvertGithubDeploymentEnabled() bool {
