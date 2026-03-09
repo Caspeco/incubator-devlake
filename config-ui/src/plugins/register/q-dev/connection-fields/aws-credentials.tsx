@@ -51,7 +51,7 @@ export const AwsCredentials = ({ type, initialValues, values, setValues, setErro
   const accessKeyId = values.accessKeyId ?? '';
   const secretAccessKey = values.secretAccessKey ?? '';
   const region = values.region ?? '';
-
+  
   const isAccessKeyAuth = authType === 'access_key';
 
   useEffect(() => {
@@ -141,10 +141,10 @@ export const AwsCredentials = ({ type, initialValues, values, setValues, setErro
   const handleAuthTypeChange = (e: any) => {
     const newAuthType = e.target.value;
     setValues({ authType: newAuthType });
-
+    
     // Clear access key fields when switching to IAM role
     if (newAuthType === 'iam_role') {
-      setValues({
+      setValues({ 
         authType: newAuthType,
         accessKeyId: '',
         secretAccessKey: ''
