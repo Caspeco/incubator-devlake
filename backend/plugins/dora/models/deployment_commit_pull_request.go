@@ -15,18 +15,17 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package migrationscripts
+package models
 
-import (
-	"github.com/apache/incubator-devlake/core/plugin"
-)
+type DeploymentCommitPullRequest struct {
+	ProjectName        string `gorm:"primaryKey;type:varchar(100)"`
+	DeploymentCommitId string `gorm:"primaryKey;type:varchar(255)"`
+	PullRequestId      string `gorm:"primaryKey;type:varchar(255)"`
+	MatchedCommitSha   string `gorm:"primaryKey;type:varchar(40)"`
+	PullRequestKey     int
+	DetectionMethod    string `gorm:"type:varchar(64)"`
+}
 
-// All return all the migration scripts
-func All() []plugin.MigrationScript {
-	return []plugin.MigrationScript{
-		new(addDoraBenchmark),
-		new(fixDoraBenchmarkMetric),
-		new(adddoraBenchmark2023),
-		new(addCicdDeploymentCommitPullRequests),
-	}
+func (DeploymentCommitPullRequest) TableName() string {
+	return "cicd_deployment_commit_pull_requests"
 }

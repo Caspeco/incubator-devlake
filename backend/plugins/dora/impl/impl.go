@@ -93,6 +93,7 @@ func (p Dora) SubTaskMetas() []plugin.SubTaskMeta {
 		tasks.DeploymentCommitsGeneratorMeta,
 		tasks.EnrichPrevSuccessDeploymentCommitMeta,
 		tasks.EnrichTaskEnvMeta,
+		tasks.DetectCherryPickedPullRequestsMeta,
 		tasks.CalculateChangeLeadTimeMeta,
 		tasks.IssuesToIncidentsMeta,
 		tasks.ConnectIncidentToDeploymentMeta,
@@ -159,6 +160,7 @@ func (p Dora) MakeMetricPluginPipelinePlanV200(projectName string, options json.
 					"projectName": projectName,
 				},
 				Subtasks: []string{
+					tasks.DetectCherryPickedPullRequestsMeta.Name,
 					"calculateChangeLeadTime",
 					tasks.IssuesToIncidentsMeta.Name,
 					"ConnectIncidentToDeployment",
