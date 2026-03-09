@@ -110,6 +110,7 @@ export const GitHubConfig: IPluginConfig = {
       envNamePattern: '(?i)prod(.*)',
       deploymentPattern: '',
       productionPattern: '',
+      autodetectCherryPickedPrs: false,
       prType: 'type(.*)',
       prComponent: 'component(.*)',
       prBodyClosePattern:
