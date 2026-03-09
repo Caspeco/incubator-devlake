@@ -147,7 +147,7 @@ export const AwsCredentials = ({ type, initialValues, values, setValues, setErro
       setValues({
         authType: newAuthType,
         accessKeyId: '',
-        secretAccessKey: '',
+        secretAccessKey: ''
       });
     }
   };
@@ -163,11 +163,7 @@ export const AwsCredentials = ({ type, initialValues, values, setValues, setErro
 
       {isAccessKeyAuth && (
         <>
-          <Block
-            title="AWS Access Key ID"
-            description="Use the Access Key ID of the IAM user that can access your S3 bucket"
-            required
-          >
+          <Block title="AWS Access Key ID" description="Use the Access Key ID of the IAM user that can access your S3 bucket" required>
             <Input
               style={{ width: 386 }}
               placeholder="AKIAIOSFODNN7EXAMPLE"
@@ -178,11 +174,7 @@ export const AwsCredentials = ({ type, initialValues, values, setValues, setErro
             {accessKeyError && <div style={{ marginTop: 4, color: '#f5222d' }}>{accessKeyError}</div>}
           </Block>
 
-          <Block
-            title="AWS Secret Access Key"
-            description="Use the Secret Access Key paired with the Access Key ID"
-            required
-          >
+          <Block title="AWS Secret Access Key" description="Use the Secret Access Key paired with the Access Key ID" required>
             <Input.Password
               style={{ width: 386 }}
               placeholder={isUpdate ? '********' : 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'}
@@ -196,14 +188,11 @@ export const AwsCredentials = ({ type, initialValues, values, setValues, setErro
       )}
 
       {!isAccessKeyAuth && (
-        <Block
-          title="IAM Role Authentication"
-          description="DevLake will use the IAM role attached to the EC2 instance, ECS task, or Lambda function"
-        >
+        <Block title="IAM Role Authentication" description="DevLake will use the IAM role attached to the EC2 instance, ECS task, or Lambda function">
           <div style={{ padding: '12px', backgroundColor: '#f6f8fa', borderRadius: '6px', color: '#586069' }}>
             <p style={{ margin: 0 }}>
-              Make sure the IAM role has the necessary S3 permissions to access your bucket. No additional credentials
-              are required when using IAM role authentication.
+              Make sure the IAM role has the necessary S3 permissions to access your bucket.
+              No additional credentials are required when using IAM role authentication.
             </p>
           </div>
         </Block>
