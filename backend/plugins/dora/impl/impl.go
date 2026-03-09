@@ -24,6 +24,7 @@ import (
 	"github.com/apache/incubator-devlake/core/errors"
 	coreModels "github.com/apache/incubator-devlake/core/models"
 	"github.com/apache/incubator-devlake/core/plugin"
+	"github.com/apache/incubator-devlake/plugins/dora/models"
 	"github.com/apache/incubator-devlake/plugins/dora/models/migrationscripts"
 	"github.com/apache/incubator-devlake/plugins/dora/tasks"
 )
@@ -68,7 +69,9 @@ func (p Dora) RequiredDataEntities() (data []map[string]interface{}, err errors.
 }
 
 func (p Dora) GetTablesInfo() []dal.Tabler {
-	return []dal.Tabler{}
+	return []dal.Tabler{
+		&models.DeploymentCommitPullRequest{},
+	}
 }
 
 func (p Dora) Name() string {
