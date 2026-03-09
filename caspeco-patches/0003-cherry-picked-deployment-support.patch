@@ -1,0 +1,628 @@
+diff --git a/CASPECO.md b/CASPECO.md
+index f6126dfb3..585402cae 100644
+--- a/CASPECO.md
++++ b/CASPECO.md
+@@ -88,3 +88,35 @@ This document lists each change introduced in this fork after the baseline commi
+ - `docker-compose.yml`
+ - `grafana/Dockerfile`
+ - `grafana/dashboards/DORADetails-ChangeFailureRate.json`
++
++---
++
++## 2026-03-09 - Support cherry-pick-based deployments (`7906fd7ea`)
++
++### What changed
++- Added DORA support for deployments that promote cherry-picked commits instead of the original PR merge commit.
++- Added a per-repository GitHub scope-config flag and UI toggle to enable autodetection.
++
++### Key details
++- Added a new DORA subtask, `detectCherryPickedPullRequests`, before change lead time calculation.
++- The detector scans commit diffs between consecutive successful production deployments and extracts PR references from commit messages using the `(#1234)` pattern.
++- Detected matches are stored in a new `cicd_deployment_commit_pull_requests` table, keyed by project, deployment commit, PR, and matched commit SHA.
++- Change lead time lookup now falls back to the autodetected deployment-to-PR mapping when a deployment cannot be linked through the PR merge commit directly.
++- Added GitHub scope-config support for `autodetectCherryPickedPrs`:
++  - backend model field
++  - migration for `_tool_github_scope_configs`
++  - default config value and Config UI checkbox under Additional Settings
++
++### Files
++- `backend/plugins/dora/impl/impl.go`
++- `backend/plugins/dora/impl/impl_test.go`
++- `backend/plugins/dora/models/deployment_commit_pull_request.go`
++- `backend/plugins/dora/models/migrationscripts/20260306_add_cicd_deployment_commit_pull_requests.go`
++- `backend/plugins/dora/models/migrationscripts/register.go`
++- `backend/plugins/dora/tasks/change_lead_time_calculator.go`
++- `backend/plugins/dora/tasks/cherry_picked_pr_detector.go`
++- `backend/plugins/github/models/migrationscripts/20260306_add_autodetect_cherry_picked_prs_to_scope_configs.go`
++- `backend/plugins/github/models/migrationscripts/register.go`
++- `backend/plugins/github/models/scope_config.go`
++- `config-ui/src/plugins/register/github/config.tsx`
++- `config-ui/src/plugins/register/github/transformation.tsx`
+diff --git a/backend/plugins/dora/impl/impl.go b/backend/plugins/dora/impl/impl.go
+index 246097398..a6a5dc801 100644
+--- a/backend/plugins/dora/impl/impl.go
++++ b/backend/plugins/dora/impl/impl.go
+@@ -93,6 +93,7 @@ func (p Dora) SubTaskMetas() []plugin.SubTaskMeta {
+ 		tasks.DeploymentCommitsGeneratorMeta,
+ 		tasks.EnrichPrevSuccessDeploymentCommitMeta,
+ 		tasks.EnrichTaskEnvMeta,
++		tasks.DetectCherryPickedPullRequestsMeta,
+ 		tasks.CalculateChangeLeadTimeMeta,
+ 		tasks.IssuesToIncidentsMeta,
+ 		tasks.ConnectIncidentToDeploymentMeta,
+@@ -159,6 +160,7 @@ func (p Dora) MakeMetricPluginPipelinePlanV200(projectName string, options json.
+ 					"projectName": projectName,
+ 				},
+ 				Subtasks: []string{
++					tasks.DetectCherryPickedPullRequestsMeta.Name,
+ 					"calculateChangeLeadTime",
+ 					tasks.IssuesToIncidentsMeta.Name,
+ 					"ConnectIncidentToDeployment",
+diff --git a/backend/plugins/dora/impl/impl_test.go b/backend/plugins/dora/impl/impl_test.go
+index 7719d09e5..1ba47b1c8 100644
+--- a/backend/plugins/dora/impl/impl_test.go
++++ b/backend/plugins/dora/impl/impl_test.go
+@@ -60,6 +60,7 @@ func TestMakeMetricPluginPipelinePlanV200(t *testing.T) {
+ 			{
+ 				Plugin: "dora",
+ 				Subtasks: []string{
++					tasks.DetectCherryPickedPullRequestsMeta.Name,
+ 					"calculateChangeLeadTime",
+ 					tasks.IssuesToIncidentsMeta.Name,
+ 					"ConnectIncidentToDeployment",
+diff --git a/backend/plugins/dora/models/deployment_commit_pull_request.go b/backend/plugins/dora/models/deployment_commit_pull_request.go
+new file mode 100644
+index 000000000..f86ebde44
+--- /dev/null
++++ b/backend/plugins/dora/models/deployment_commit_pull_request.go
+@@ -0,0 +1,31 @@
++/*
++Licensed to the Apache Software Foundation (ASF) under one or more
++contributor license agreements.  See the NOTICE file distributed with
++this work for additional information regarding copyright ownership.
++The ASF licenses this file to You under the Apache License, Version 2.0
++(the "License"); you may not use this file except in compliance with
++the License.  You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package models
++
++type DeploymentCommitPullRequest struct {
++	ProjectName        string `gorm:"primaryKey;type:varchar(100)"`
++	DeploymentCommitId string `gorm:"primaryKey;type:varchar(255)"`
++	PullRequestId      string `gorm:"primaryKey;type:varchar(255)"`
++	MatchedCommitSha   string `gorm:"primaryKey;type:varchar(40)"`
++	PullRequestKey     int
++	DetectionMethod    string `gorm:"type:varchar(64)"`
++}
++
++func (DeploymentCommitPullRequest) TableName() string {
++	return "cicd_deployment_commit_pull_requests"
++}
+diff --git a/backend/plugins/dora/models/migrationscripts/20260306_add_cicd_deployment_commit_pull_requests.go b/backend/plugins/dora/models/migrationscripts/20260306_add_cicd_deployment_commit_pull_requests.go
+new file mode 100644
+index 000000000..54fd32ec8
+--- /dev/null
++++ b/backend/plugins/dora/models/migrationscripts/20260306_add_cicd_deployment_commit_pull_requests.go
+@@ -0,0 +1,45 @@
++/*
++Licensed to the Apache Software Foundation (ASF) under one or more
++contributor license agreements.  See the NOTICE file distributed with
++this work for additional information regarding copyright ownership.
++The ASF licenses this file to You under the Apache License, Version 2.0
++(the "License"); you may not use this file except in compliance with
++the License.  You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package migrationscripts
++
++import (
++	"github.com/apache/incubator-devlake/core/context"
++	"github.com/apache/incubator-devlake/core/errors"
++	"github.com/apache/incubator-devlake/core/plugin"
++	"github.com/apache/incubator-devlake/helpers/migrationhelper"
++	"github.com/apache/incubator-devlake/plugins/dora/models"
++)
++
++var _ plugin.MigrationScript = (*addCicdDeploymentCommitPullRequests)(nil)
++
++type addCicdDeploymentCommitPullRequests struct{}
++
++func (*addCicdDeploymentCommitPullRequests) Up(baseRes context.BasicRes) errors.Error {
++	return migrationhelper.AutoMigrateTables(
++		baseRes,
++		&models.DeploymentCommitPullRequest{},
++	)
++}
++
++func (*addCicdDeploymentCommitPullRequests) Version() uint64 {
++	return 20260306010000
++}
++
++func (*addCicdDeploymentCommitPullRequests) Name() string {
++	return "add cicd_deployment_commit_pull_requests table"
++}
+diff --git a/backend/plugins/dora/models/migrationscripts/register.go b/backend/plugins/dora/models/migrationscripts/register.go
+index 6a12d0719..3eea752bc 100644
+--- a/backend/plugins/dora/models/migrationscripts/register.go
++++ b/backend/plugins/dora/models/migrationscripts/register.go
+@@ -27,5 +27,6 @@ func All() []plugin.MigrationScript {
+ 		new(addDoraBenchmark),
+ 		new(fixDoraBenchmarkMetric),
+ 		new(adddoraBenchmark2023),
++		new(addCicdDeploymentCommitPullRequests),
+ 	}
+ }
+diff --git a/backend/plugins/dora/tasks/change_lead_time_calculator.go b/backend/plugins/dora/tasks/change_lead_time_calculator.go
+index d559ac39a..178f3383c 100644
+--- a/backend/plugins/dora/tasks/change_lead_time_calculator.go
++++ b/backend/plugins/dora/tasks/change_lead_time_calculator.go
+@@ -29,6 +29,7 @@ import (
+ 	"github.com/apache/incubator-devlake/core/models/domainlayer/devops"
+ 	"github.com/apache/incubator-devlake/core/plugin"
+ 	"github.com/apache/incubator-devlake/helpers/pluginhelper/api"
++	"github.com/apache/incubator-devlake/plugins/dora/models"
+ )
+ 
+ // CalculateChangeLeadTimeMeta contains metadata for the CalculateChangeLeadTime subtask.
+@@ -227,6 +228,32 @@ func getDeploymentCommit(mergeSha string, projectName string, db dal.Dal) (*devo
+ 	if err != nil {
+ 		return nil, err
+ 	}
++	if len(deploymentCommits) == 0 {
++		return getDeploymentCommitByAutodetectedPr(mergeSha, projectName, db)
++	}
++	return deploymentCommits[0], nil
++}
++
++func getDeploymentCommitByAutodetectedPr(mergeSha string, projectName string, db dal.Dal) (*devops.CicdDeploymentCommit, errors.Error) {
++	deploymentCommits := make([]*devops.CicdDeploymentCommit, 0, 1)
++	err := db.All(
++		&deploymentCommits,
++		dal.Select("dc.*"),
++		dal.From(models.DeploymentCommitPullRequest{}.TableName()+" dpr"),
++		dal.Join("INNER JOIN pull_requests pr ON (pr.id = dpr.pull_request_id)"),
++		dal.Join("INNER JOIN cicd_deployment_commits dc ON (dc.id = dpr.deployment_commit_id)"),
++		dal.Join("LEFT JOIN project_mapping pm ON (pm.table = 'cicd_scopes' AND pm.row_id = dc.cicd_scope_id)"),
++		dal.Where("dpr.project_name = ?", projectName),
++		dal.Where("pm.project_name = ? AND pr.merge_commit_sha = ?", projectName, mergeSha),
++		dal.Where("dc.prev_success_deployment_commit_id <> ''"),
++		dal.Where("dc.environment = 'PRODUCTION'"),
++		dal.Where("dc.result = ?", devops.RESULT_SUCCESS),
++		dal.Orderby("dc.started_date, dc.id ASC"),
++		dal.Limit(1),
++	)
++	if err != nil {
++		return nil, err
++	}
+ 	if len(deploymentCommits) == 0 {
+ 		return nil, nil
+ 	}
+diff --git a/backend/plugins/dora/tasks/cherry_picked_pr_detector.go b/backend/plugins/dora/tasks/cherry_picked_pr_detector.go
+new file mode 100644
+index 000000000..86de005aa
+--- /dev/null
++++ b/backend/plugins/dora/tasks/cherry_picked_pr_detector.go
+@@ -0,0 +1,261 @@
++/*
++Licensed to the Apache Software Foundation (ASF) under one or more
++contributor license agreements.  See the NOTICE file distributed with
++this work for additional information regarding copyright ownership.
++The ASF licenses this file to You under the Apache License, Version 2.0
++(the "License"); you may not use this file except in compliance with
++the License.  You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package tasks
++
++import (
++	"regexp"
++	"strconv"
++	"strings"
++
++	"github.com/apache/incubator-devlake/core/dal"
++	"github.com/apache/incubator-devlake/core/errors"
++	"github.com/apache/incubator-devlake/core/plugin"
++	"github.com/apache/incubator-devlake/plugins/dora/models"
++)
++
++var DetectCherryPickedPullRequestsMeta = plugin.SubTaskMeta{
++	Name:             "detectCherryPickedPullRequests",
++	EntryPoint:       DetectCherryPickedPullRequests,
++	EnabledByDefault: true,
++	Description:      "detect PR references like (#1234) from deployment commit diffs for cherry-picked deployment flows",
++	DomainTypes:      []string{plugin.DOMAIN_TYPE_CICD, plugin.DOMAIN_TYPE_CODE},
++}
++
++var cherryPickedPrPattern = regexp.MustCompile(`\(#(\d+)\)`)
++
++type deploymentPairForCherryPick struct {
++	Id            string
++	CicdScopeId   string
++	CommitSha     string
++	PrevCommitSha string
++}
++
++type commitMessageForCherryPick struct {
++	CommitSha string
++	Message   []byte
++}
++
++type githubRepoScopeRef struct {
++	ScopeConfigId uint64
++}
++
++type githubScopeConfigFlag struct {
++	AutodetectCherryPickedPrs bool
++}
++
++type pullRequestForCherryPick struct {
++	Id             string
++	PullRequestKey int
++}
++
++func DetectCherryPickedPullRequests(taskCtx plugin.SubTaskContext) errors.Error {
++	db := taskCtx.GetDal()
++	data := taskCtx.GetData().(*DoraTaskData)
++	projectName := data.Options.ProjectName
++	if projectName == "" {
++		return nil
++	}
++
++	err := db.Delete(
++		&models.DeploymentCommitPullRequest{},
++		dal.Where("project_name = ?", projectName),
++	)
++	if err != nil {
++		return err
++	}
++
++	pairs := make([]*deploymentPairForCherryPick, 0)
++	err = db.All(
++		&pairs,
++		dal.Select("dc.id, dc.cicd_scope_id, dc.commit_sha, p.commit_sha as prev_commit_sha"),
++		dal.From("cicd_deployment_commits dc"),
++		dal.Join("LEFT JOIN cicd_deployment_commits p ON (dc.prev_success_deployment_commit_id = p.id)"),
++		dal.Join("LEFT JOIN project_mapping pm ON (pm.table = 'cicd_scopes' AND pm.row_id = dc.cicd_scope_id)"),
++		dal.Where("pm.project_name = ?", projectName),
++		dal.Where("dc.result = 'SUCCESS'"),
++		dal.Where("dc.environment = 'PRODUCTION'"),
++		dal.Where("dc.prev_success_deployment_commit_id <> ''"),
++	)
++	if err != nil {
++		return err
++	}
++
++	enabledByScope := map[string]bool{}
++	prCache := map[string]*pullRequestForCherryPick{}
++
++	for _, pair := range pairs {
++		enabled, err := isCherryPickAutodetectEnabledForScope(db, pair.CicdScopeId, enabledByScope)
++		if err != nil {
++			return err
++		}
++		if !enabled {
++			continue
++		}
++
++		commits := make([]*commitMessageForCherryPick, 0)
++		err = db.All(
++			&commits,
++			dal.Select("cd.commit_sha, c.message"),
++			dal.From("commits_diffs cd"),
++			dal.Join("INNER JOIN commits c ON (c.sha = cd.commit_sha)"),
++			dal.Where("cd.new_commit_sha = ? AND cd.old_commit_sha = ?", pair.CommitSha, pair.PrevCommitSha),
++		)
++		if err != nil {
++			return err
++		}
++
++		for _, commit := range commits {
++			matches := cherryPickedPrPattern.FindAllSubmatch(commit.Message, -1)
++			if len(matches) == 0 {
++				continue
++			}
++			seenPrNumbers := map[int]struct{}{}
++			for _, match := range matches {
++				if len(match) < 2 {
++					continue
++				}
++				prNumber, convErr := strconv.Atoi(string(match[1]))
++				if convErr != nil {
++					continue
++				}
++				if _, exists := seenPrNumbers[prNumber]; exists {
++					continue
++				}
++				seenPrNumbers[prNumber] = struct{}{}
++
++				pr, err := findPullRequestByScopeAndNumber(db, pair.CicdScopeId, prNumber, prCache)
++				if err != nil {
++					return err
++				}
++				if pr == nil {
++					continue
++				}
++
++				record := &models.DeploymentCommitPullRequest{
++					ProjectName:        projectName,
++					DeploymentCommitId: pair.Id,
++					PullRequestId:      pr.Id,
++					MatchedCommitSha:   commit.CommitSha,
++					PullRequestKey:     pr.PullRequestKey,
++					DetectionMethod:    "commit_message_reference",
++				}
++				err = db.CreateOrUpdate(record)
++				if err != nil {
++					return err
++				}
++			}
++		}
++	}
++
++	return nil
++}
++
++func isCherryPickAutodetectEnabledForScope(db dal.Dal, scopeId string, cache map[string]bool) (bool, errors.Error) {
++	if cached, ok := cache[scopeId]; ok {
++		return cached, nil
++	}
++
++	connectionId, githubId, ok := parseGithubRepoScopeId(scopeId)
++	if !ok {
++		cache[scopeId] = false
++		return false, nil
++	}
++
++	scopeRef := &githubRepoScopeRef{}
++	err := db.First(
++		scopeRef,
++		dal.From("_tool_github_repos"),
++		dal.Select("scope_config_id"),
++		dal.Where("connection_id = ? AND github_id = ?", connectionId, githubId),
++	)
++	if err != nil {
++		if db.IsErrorNotFound(err) {
++			cache[scopeId] = false
++			return false, nil
++		}
++		return false, err
++	}
++	if scopeRef.ScopeConfigId == 0 {
++		cache[scopeId] = false
++		return false, nil
++	}
++
++	scopeConfigFlag := &githubScopeConfigFlag{}
++	err = db.First(
++		scopeConfigFlag,
++		dal.From("_tool_github_scope_configs"),
++		dal.Select("autodetect_cherry_picked_prs"),
++		dal.Where("id = ?", scopeRef.ScopeConfigId),
++	)
++	if err != nil {
++		if db.IsErrorNotFound(err) {
++			cache[scopeId] = false
++			return false, nil
++		}
++		return false, err
++	}
++
++	cache[scopeId] = scopeConfigFlag.AutodetectCherryPickedPrs
++	return scopeConfigFlag.AutodetectCherryPickedPrs, nil
++}
++
++func parseGithubRepoScopeId(scopeId string) (uint64, int, bool) {
++	parts := strings.Split(scopeId, ":")
++	if len(parts) != 4 || parts[0] != "github" || parts[1] != "GithubRepo" {
++		return 0, 0, false
++	}
++	connectionId, err := strconv.ParseUint(parts[2], 10, 64)
++	if err != nil {
++		return 0, 0, false
++	}
++	githubId, err := strconv.Atoi(parts[3])
++	if err != nil {
++		return 0, 0, false
++	}
++	return connectionId, githubId, true
++}
++
++func findPullRequestByScopeAndNumber(
++	db dal.Dal,
++	scopeId string,
++	prNumber int,
++	cache map[string]*pullRequestForCherryPick,
++) (*pullRequestForCherryPick, errors.Error) {
++	cacheKey := scopeId + ":" + strconv.Itoa(prNumber)
++	if cached, ok := cache[cacheKey]; ok {
++		return cached, nil
++	}
++
++	pr := &pullRequestForCherryPick{}
++	err := db.First(
++		pr,
++		dal.From("pull_requests"),
++		dal.Select("id, pull_request_key"),
++		dal.Where("base_repo_id = ? AND pull_request_key = ?", scopeId, prNumber),
++		dal.Orderby("created_date DESC"),
++	)
++	if err != nil {
++		if db.IsErrorNotFound(err) {
++			cache[cacheKey] = nil
++			return nil, nil
++		}
++		return nil, err
++	}
++	cache[cacheKey] = pr
++	return pr, nil
++}
+diff --git a/backend/plugins/github/models/migrationscripts/20260306_add_autodetect_cherry_picked_prs_to_scope_configs.go b/backend/plugins/github/models/migrationscripts/20260306_add_autodetect_cherry_picked_prs_to_scope_configs.go
+new file mode 100644
+index 000000000..9dab71e70
+--- /dev/null
++++ b/backend/plugins/github/models/migrationscripts/20260306_add_autodetect_cherry_picked_prs_to_scope_configs.go
+@@ -0,0 +1,52 @@
++/*
++Licensed to the Apache Software Foundation (ASF) under one or more
++contributor license agreements.  See the NOTICE file distributed with
++this work for additional information regarding copyright ownership.
++The ASF licenses this file to You under the Apache License, Version 2.0
++(the "License"); you may not use this file except in compliance with
++the License.  You may obtain a copy of the License at
++
++    http://www.apache.org/licenses/LICENSE-2.0
++
++Unless required by applicable law or agreed to in writing, software
++distributed under the License is distributed on an "AS IS" BASIS,
++WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
++See the License for the specific language governing permissions and
++limitations under the License.
++*/
++
++package migrationscripts
++
++import (
++	"github.com/apache/incubator-devlake/core/context"
++	"github.com/apache/incubator-devlake/core/errors"
++	"github.com/apache/incubator-devlake/core/plugin"
++	"github.com/apache/incubator-devlake/helpers/migrationhelper"
++)
++
++var _ plugin.MigrationScript = (*addAutodetectCherryPickedPrsToScopeConfigs)(nil)
++
++type scopeConfig20260306 struct {
++	AutodetectCherryPickedPrs bool `json:"autodetectCherryPickedPrs"`
++}
++
++func (scopeConfig20260306) TableName() string {
++	return "_tool_github_scope_configs"
++}
++
++type addAutodetectCherryPickedPrsToScopeConfigs struct{}
++
++func (*addAutodetectCherryPickedPrsToScopeConfigs) Up(basicRes context.BasicRes) errors.Error {
++	return migrationhelper.AutoMigrateTables(
++		basicRes,
++		&scopeConfig20260306{},
++	)
++}
++
++func (*addAutodetectCherryPickedPrsToScopeConfigs) Version() uint64 {
++	return 20260306000000
++}
++
++func (*addAutodetectCherryPickedPrsToScopeConfigs) Name() string {
++	return "add autodetect_cherry_picked_prs to _tool_github_scope_configs"
++}
+diff --git a/backend/plugins/github/models/migrationscripts/register.go b/backend/plugins/github/models/migrationscripts/register.go
+index bf4635699..499779e77 100644
+--- a/backend/plugins/github/models/migrationscripts/register.go
++++ b/backend/plugins/github/models/migrationscripts/register.go
+@@ -56,5 +56,6 @@ func All() []plugin.MigrationScript {
+ 		new(changeIssueComponentType),
+ 		new(addIndexToGithubJobs),
+ 		new(addLatestStatusUpdateDateToDeployment),
++		new(addAutodetectCherryPickedPrsToScopeConfigs),
+ 	}
+ }
+diff --git a/backend/plugins/github/models/scope_config.go b/backend/plugins/github/models/scope_config.go
+index 60b298d36..76b874cd2 100644
+--- a/backend/plugins/github/models/scope_config.go
++++ b/backend/plugins/github/models/scope_config.go
+@@ -26,20 +26,21 @@ import (
+ var _ plugin.ToolLayerScopeConfig = (*GithubScopeConfig)(nil)
+ 
+ type GithubScopeConfig struct {
+-	common.ScopeConfig   `mapstructure:",squash" json:",inline" gorm:"embedded"`
+-	PrType               string            `mapstructure:"prType,omitempty" json:"prType" gorm:"type:varchar(255)"`
+-	PrComponent          string            `mapstructure:"prComponent,omitempty" json:"prComponent" gorm:"type:varchar(255)"`
+-	PrBodyClosePattern   string            `mapstructure:"prBodyClosePattern,omitempty" json:"prBodyClosePattern" gorm:"type:varchar(255)"`
+-	IssueSeverity        string            `mapstructure:"issueSeverity,omitempty" json:"issueSeverity" gorm:"type:varchar(255)"`
+-	IssuePriority        string            `mapstructure:"issuePriority,omitempty" json:"issuePriority" gorm:"type:varchar(255)"`
+-	IssueComponent       string            `mapstructure:"issueComponent,omitempty" json:"issueComponent" gorm:"type:varchar(255)"`
+-	IssueTypeBug         string            `mapstructure:"issueTypeBug,omitempty" json:"issueTypeBug" gorm:"type:varchar(255)"`
+-	IssueTypeIncident    string            `mapstructure:"issueTypeIncident,omitempty" json:"issueTypeIncident" gorm:"type:varchar(255)"`
+-	IssueTypeRequirement string            `mapstructure:"issueTypeRequirement,omitempty" json:"issueTypeRequirement" gorm:"type:varchar(255)"`
+-	DeploymentPattern    string            `mapstructure:"deploymentPattern,omitempty" json:"deploymentPattern" gorm:"type:varchar(255)"`
+-	ProductionPattern    string            `mapstructure:"productionPattern,omitempty" json:"productionPattern" gorm:"type:varchar(255)"`
+-	EnvNamePattern       string            `mapstructure:"envNamePattern,omitempty" json:"envNamePattern" gorm:"type:varchar(255)"`
+-	Refdiff              datatypes.JSONMap `mapstructure:"refdiff,omitempty" json:"refdiff" swaggertype:"object" format:"json"`
++	common.ScopeConfig        `mapstructure:",squash" json:",inline" gorm:"embedded"`
++	PrType                    string            `mapstructure:"prType,omitempty" json:"prType" gorm:"type:varchar(255)"`
++	PrComponent               string            `mapstructure:"prComponent,omitempty" json:"prComponent" gorm:"type:varchar(255)"`
++	PrBodyClosePattern        string            `mapstructure:"prBodyClosePattern,omitempty" json:"prBodyClosePattern" gorm:"type:varchar(255)"`
++	IssueSeverity             string            `mapstructure:"issueSeverity,omitempty" json:"issueSeverity" gorm:"type:varchar(255)"`
++	IssuePriority             string            `mapstructure:"issuePriority,omitempty" json:"issuePriority" gorm:"type:varchar(255)"`
++	IssueComponent            string            `mapstructure:"issueComponent,omitempty" json:"issueComponent" gorm:"type:varchar(255)"`
++	IssueTypeBug              string            `mapstructure:"issueTypeBug,omitempty" json:"issueTypeBug" gorm:"type:varchar(255)"`
++	IssueTypeIncident         string            `mapstructure:"issueTypeIncident,omitempty" json:"issueTypeIncident" gorm:"type:varchar(255)"`
++	IssueTypeRequirement      string            `mapstructure:"issueTypeRequirement,omitempty" json:"issueTypeRequirement" gorm:"type:varchar(255)"`
++	DeploymentPattern         string            `mapstructure:"deploymentPattern,omitempty" json:"deploymentPattern" gorm:"type:varchar(255)"`
++	ProductionPattern         string            `mapstructure:"productionPattern,omitempty" json:"productionPattern" gorm:"type:varchar(255)"`
++	EnvNamePattern            string            `mapstructure:"envNamePattern,omitempty" json:"envNamePattern" gorm:"type:varchar(255)"`
++	AutodetectCherryPickedPrs bool              `mapstructure:"autodetectCherryPickedPrs,omitempty" json:"autodetectCherryPickedPrs"`
++	Refdiff                   datatypes.JSONMap `mapstructure:"refdiff,omitempty" json:"refdiff" swaggertype:"object" format:"json"`
+ }
+ 
+ // GetConnectionId implements plugin.ToolLayerScopeConfig.
+diff --git a/config-ui/src/plugins/register/github/config.tsx b/config-ui/src/plugins/register/github/config.tsx
+index 9a372f984..6ccccf03a 100644
+--- a/config-ui/src/plugins/register/github/config.tsx
++++ b/config-ui/src/plugins/register/github/config.tsx
+@@ -109,6 +109,7 @@ export const GitHubConfig: IPluginConfig = {
+       envNamePattern: '(?i)prod(.*)',
+       deploymentPattern: '',
+       productionPattern: '',
++      autodetectCherryPickedPrs: false,
+       prType: 'type(.*)',
+       prComponent: 'component(.*)',
+       prBodyClosePattern:
+diff --git a/config-ui/src/plugins/register/github/transformation.tsx b/config-ui/src/plugins/register/github/transformation.tsx
+index 0d6473c4d..41050c575 100644
+--- a/config-ui/src/plugins/register/github/transformation.tsx
++++ b/config-ui/src/plugins/register/github/transformation.tsx
+@@ -409,6 +409,19 @@ const renderCollapseItems = ({
+             version-based metrics
+             <HelpTooltip content="Calculate the commits diff between two consecutive tags that match the following RegEx. Issues closed by PRs which contain these commits will also be calculated. The result will be shown in table.refs_commits_diffs and table.refs_issues_diffs." />
+           </p>
++          <Form.Item>
++            <Checkbox
++              checked={transformation.autodetectCherryPickedPrs ?? false}
++              onChange={(e) =>
++                onChangeTransformation({
++                  ...transformation,
++                  autodetectCherryPickedPrs: e.target.checked,
++                })
++              }
++            >
++              Autodetect cherry-picked PRs
++            </Checkbox>
++          </Form.Item>
+           <div className="refdiff">
+             Compare the last
+             <Input
