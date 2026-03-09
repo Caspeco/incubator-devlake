@@ -39,6 +39,7 @@ type GithubScopeConfig struct {
 	DeploymentPattern         string            `mapstructure:"deploymentPattern,omitempty" json:"deploymentPattern" gorm:"type:varchar(255)"`
 	ProductionPattern         string            `mapstructure:"productionPattern,omitempty" json:"productionPattern" gorm:"type:varchar(255)"`
 	EnvNamePattern            string            `mapstructure:"envNamePattern,omitempty" json:"envNamePattern" gorm:"type:varchar(255)"`
+	ConvertGithubDeployment   *bool             `mapstructure:"convertGithubDeployment,omitempty" json:"convertGithubDeployment" gorm:"type:boolean"`
 	AutodetectCherryPickedPrs bool              `mapstructure:"autodetectCherryPickedPrs,omitempty" json:"autodetectCherryPickedPrs"`
 	PrTitlePrefixTeamMappings string            `mapstructure:"prTitlePrefixTeamMappings,omitempty" json:"prTitlePrefixTeamMappings" gorm:"type:text"`
 	ConvertGithubDeployment   *bool             `mapstructure:"convertGithubDeployment,omitempty" json:"convertGithubDeployment" gorm:"type:boolean"`
