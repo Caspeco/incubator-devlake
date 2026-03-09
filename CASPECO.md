@@ -88,3 +88,35 @@ This document lists each change introduced in this fork after the baseline commi
 - `docker-compose.yml`
 - `grafana/Dockerfile`
 - `grafana/dashboards/DORADetails-ChangeFailureRate.json`
+
+---
+
+## 2026-03-09 - Support cherry-pick-based deployments (`7906fd7ea`)
+
+### What changed
+- Added DORA support for deployments that promote cherry-picked commits instead of the original PR merge commit.
+- Added a per-repository GitHub scope-config flag and UI toggle to enable autodetection.
+
+### Key details
+- Added a new DORA subtask, `detectCherryPickedPullRequests`, before change lead time calculation.
+- The detector scans commit diffs between consecutive successful production deployments and extracts PR references from commit messages using the `(#1234)` pattern.
+- Detected matches are stored in a new `cicd_deployment_commit_pull_requests` table, keyed by project, deployment commit, PR, and matched commit SHA.
+- Change lead time lookup now falls back to the autodetected deployment-to-PR mapping when a deployment cannot be linked through the PR merge commit directly.
+- Added GitHub scope-config support for `autodetectCherryPickedPrs`:
+  - backend model field
+  - migration for `_tool_github_scope_configs`
+  - default config value and Config UI checkbox under Additional Settings
+
+### Files
+- `backend/plugins/dora/impl/impl.go`
+- `backend/plugins/dora/impl/impl_test.go`
+- `backend/plugins/dora/models/deployment_commit_pull_request.go`
+- `backend/plugins/dora/models/migrationscripts/20260306_add_cicd_deployment_commit_pull_requests.go`
+- `backend/plugins/dora/models/migrationscripts/register.go`
+- `backend/plugins/dora/tasks/change_lead_time_calculator.go`
+- `backend/plugins/dora/tasks/cherry_picked_pr_detector.go`
+- `backend/plugins/github/models/migrationscripts/20260306_add_autodetect_cherry_picked_prs_to_scope_configs.go`
+- `backend/plugins/github/models/migrationscripts/register.go`
+- `backend/plugins/github/models/scope_config.go`
+- `config-ui/src/plugins/register/github/config.tsx`
+- `config-ui/src/plugins/register/github/transformation.tsx`
