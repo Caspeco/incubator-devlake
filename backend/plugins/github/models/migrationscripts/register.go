@@ -56,6 +56,7 @@ func All() []plugin.MigrationScript {
 		new(changeIssueComponentType),
 		new(addIndexToGithubJobs),
 		new(addLatestStatusUpdateDateToDeployment),
+		new(addConvertGithubDeploymentToScopeConfigs),
 		new(addAutodetectCherryPickedPrsToScopeConfigs),
 	}
 }

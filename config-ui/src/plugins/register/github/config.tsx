@@ -106,6 +106,7 @@ export const GitHubConfig: IPluginConfig = {
       issuePriority: '(highest|high|medium|low|p0|p1|p2|p3)',
       issueComponent: 'component(.*)',
       issueSeverity: 'severity(.*)',
+      convertGithubDeployment: true,
       envNamePattern: '(?i)prod(.*)',
       deploymentPattern: '',
       productionPattern: '',
