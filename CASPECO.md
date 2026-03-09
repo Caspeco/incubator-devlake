@@ -96,6 +96,7 @@ This document lists each change introduced in this fork after the baseline commi
 ### What changed
 - Added DORA support for deployments that promote cherry-picked commits instead of the original PR merge commit.
 - Added a per-repository GitHub scope-config flag and UI toggle to enable autodetection.
+- Added focused unit tests for the new cherry-pick detector logic.
 
 ### Key details
 - Added a new DORA subtask, `detectCherryPickedPullRequests`, before change lead time calculation.
@@ -115,6 +116,7 @@ This document lists each change introduced in this fork after the baseline commi
 - `backend/plugins/dora/models/migrationscripts/register.go`
 - `backend/plugins/dora/tasks/change_lead_time_calculator.go`
 - `backend/plugins/dora/tasks/cherry_picked_pr_detector.go`
+- `backend/plugins/dora/tasks/cherry_picked_pr_detector_test.go`
 - `backend/plugins/github/models/migrationscripts/20260306_add_autodetect_cherry_picked_prs_to_scope_configs.go`
 - `backend/plugins/github/models/migrationscripts/register.go`
 - `backend/plugins/github/models/scope_config.go`
