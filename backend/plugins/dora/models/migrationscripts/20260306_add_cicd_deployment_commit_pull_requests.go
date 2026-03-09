@@ -18,15 +18,28 @@ limitations under the License.
 package migrationscripts
 
 import (
+	"github.com/apache/incubator-devlake/core/context"
+	"github.com/apache/incubator-devlake/core/errors"
 	"github.com/apache/incubator-devlake/core/plugin"
+	"github.com/apache/incubator-devlake/helpers/migrationhelper"
+	"github.com/apache/incubator-devlake/plugins/dora/models"
 )
 
-// All return all the migration scripts
-func All() []plugin.MigrationScript {
-	return []plugin.MigrationScript{
-		new(addDoraBenchmark),
-		new(fixDoraBenchmarkMetric),
-		new(adddoraBenchmark2023),
-		new(addCicdDeploymentCommitPullRequests),
-	}
+var _ plugin.MigrationScript = (*addCicdDeploymentCommitPullRequests)(nil)
+
+type addCicdDeploymentCommitPullRequests struct{}
+
+func (*addCicdDeploymentCommitPullRequests) Up(baseRes context.BasicRes) errors.Error {
+	return migrationhelper.AutoMigrateTables(
+		baseRes,
+		&models.DeploymentCommitPullRequest{},
+	)
+}
+
+func (*addCicdDeploymentCommitPullRequests) Version() uint64 {
+	return 20260306010000
+}
+
+func (*addCicdDeploymentCommitPullRequests) Name() string {
+	return "add cicd_deployment_commit_pull_requests table"
 }
