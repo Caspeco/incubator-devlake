@@ -182,13 +182,15 @@ func deleteConnection(e error, connectionId uint64) (*plugin.ApiResourceOutput, 
 
 type WebhookConnectionResponse struct {
 	models.WebhookConnection
-	PostIssuesEndpoint             string             `json:"postIssuesEndpoint"`
-	CloseIssuesEndpoint            string             `json:"closeIssuesEndpoint"`
-	PostPullRequestsEndpoint       string             `json:"postPullRequestsEndpoint"`
-	PostPipelineTaskEndpoint       string             `json:"postPipelineTaskEndpoint"`
-	PostPipelineDeployTaskEndpoint string             `json:"postPipelineDeployTaskEndpoint"`
-	ClosePipelineEndpoint          string             `json:"closePipelineEndpoint"`
-	ApiKey                         *coreModels.ApiKey `json:"apiKey,omitempty"`
+	PostIssuesEndpoint              string             `json:"postIssuesEndpoint"`
+	CloseIssuesEndpoint             string             `json:"closeIssuesEndpoint"`
+	PostPullRequestsEndpoint        string             `json:"postPullRequestsEndpoint"`
+	PostPullRequestCommitsEndpoint  string             `json:"postPullRequestCommitsEndpoint"`
+	PostPullRequestCommentsEndpoint string             `json:"postPullRequestCommentsEndpoint"`
+	PostPipelineTaskEndpoint        string             `json:"postPipelineTaskEndpoint"`
+	PostPipelineDeployTaskEndpoint  string             `json:"postPipelineDeployTaskEndpoint"`
+	ClosePipelineEndpoint           string             `json:"closePipelineEndpoint"`
+	ApiKey                          *coreModels.ApiKey `json:"apiKey,omitempty"`
 }
 
 // ListConnections
@@ -258,6 +260,8 @@ func formatConnection(connection *models.WebhookConnection, withApiKeyInfo bool)
 	response.PostIssuesEndpoint = fmt.Sprintf(`/rest/plugins/webhook/connections/%d/issues`, connection.ID)
 	response.CloseIssuesEndpoint = fmt.Sprintf(`/rest/plugins/webhook/connections/%d/issue/:issueKey/close`, connection.ID)
 	response.PostPullRequestsEndpoint = fmt.Sprintf(`/rest/plugins/webhook/connections/%d/pull_requests`, connection.ID)
+	response.PostPullRequestCommitsEndpoint = fmt.Sprintf(`/rest/plugins/webhook/connections/%d/pull_request_commits`, connection.ID)
+	response.PostPullRequestCommentsEndpoint = fmt.Sprintf(`/rest/plugins/webhook/connections/%d/pull_request_comments`, connection.ID)
 	response.PostPipelineTaskEndpoint = fmt.Sprintf(`/rest/plugins/webhook/connections/%d/cicd_tasks`, connection.ID)
 	response.PostPipelineDeployTaskEndpoint = fmt.Sprintf(`/rest/plugins/webhook/connections/%d/deployments`, connection.ID)
 	response.ClosePipelineEndpoint = fmt.Sprintf(`/rest/plugins/webhook/connections/%d/cicd_pipeline/:pipelineName/finish`, connection.ID)
