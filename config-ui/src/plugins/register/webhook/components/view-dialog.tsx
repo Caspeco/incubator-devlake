@@ -104,6 +104,10 @@ export const ViewDialog = ({ initialId, onCancel }: Props) => {
             </ExternalLink>
             .
           </p>
+          <h5>Post to register pull_request commits</h5>
+          <CopyText content={URI.postPullRequestCommitsEndpoint} />
+          <h5>Post to register pull_request comments</h5>
+          <CopyText content={URI.postPullRequestCommentsEndpoint} />
         </Block>
         <Block
           title="API Key"
