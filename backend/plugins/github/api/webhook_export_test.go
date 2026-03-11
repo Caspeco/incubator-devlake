@@ -20,6 +20,8 @@ package api
 import (
 	"testing"
 	"time"
+
+	webhookapi "github.com/apache/incubator-devlake/plugins/webhook/api"
 )
 
 func TestPullRequestMatchesTeamPrefixWithJiraKey(t *testing.T) {
@@ -144,5 +146,31 @@ func TestGithubCommitTitleMatchesAnyTeamPrefix(t *testing.T) {
 	}
 	if githubCommitTitleMatchesAnyTeamPrefix("STAFF-1862 fix mode (#6473)", []string{"AIR", "LONII"}) {
 		t.Fatal("did not expect title to match unrelated prefixes")
+	}
+}
+
+func TestDeploymentIsIncludedOnlyWhenItsCompareRangeContainsMatchedPR(t *testing.T) {
+	included := map[string]struct{}{
+		"github-workflow-1-run-2": {},
+	}
+	candidates := []githubDeploymentCandidate{
+		{deployment: webhookapi.WebhookDeploymentReq{Id: "github-workflow-1-run-1"}},
+		{deployment: webhookapi.WebhookDeploymentReq{Id: "github-workflow-1-run-2"}},
+		{deployment: webhookapi.WebhookDeploymentReq{Id: "github-workflow-1-run-3"}},
+	}
+
+	var deployments []webhookapi.WebhookDeploymentReq
+	for _, candidate := range candidates {
+		if _, ok := included[candidate.deployment.Id]; !ok {
+			continue
+		}
+		deployments = append(deployments, candidate.deployment)
+	}
+
+	if len(deployments) != 1 {
+		t.Fatalf("expected 1 deployment, got %d", len(deployments))
+	}
+	if deployments[0].Id != "github-workflow-1-run-2" {
+		t.Fatalf("unexpected deployment selected: %s", deployments[0].Id)
 	}
 }

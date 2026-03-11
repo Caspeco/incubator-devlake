@@ -646,11 +646,14 @@ func fetchGithubDeployments(
 		}
 	}
 	sortGithubDeploymentCandidates(candidates)
-	includedPRNumbers, err := findGithubDeploymentIncludedPRNumbers(apiClient, req.RepoFullName, teamPrefixes, candidates)
+	includedPRNumbers, includedDeploymentIds, err := findGithubDeploymentIncludedPRNumbers(apiClient, req.RepoFullName, teamPrefixes, candidates)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	for _, candidate := range candidates {
+		if _, ok := includedDeploymentIds[candidate.deployment.Id]; !ok {
+			continue
+		}
 		deployments = append(deployments, candidate.deployment)
 	}
 	return deployments, includedPRNumbers, warnings, nil
@@ -951,11 +954,12 @@ func findGithubDeploymentIncludedPRNumbers(
 	repoFullName string,
 	teamPrefixes []string,
 	candidates []githubDeploymentCandidate,
-) ([]int, errors.Error) {
+) ([]int, map[string]struct{}, errors.Error) {
 	logger := basicRes.GetLogger()
 	includedPRNumbers := make(map[int]struct{})
+	includedDeploymentIds := make(map[string]struct{})
 	if len(candidates) < 2 || len(teamPrefixes) == 0 {
-		return nil, nil
+		return nil, includedDeploymentIds, nil
 	}
 	for index := 1; index < len(candidates); index++ {
 		previous := candidates[index-1]
@@ -974,8 +978,9 @@ func findGithubDeploymentIncludedPRNumbers(
 		}
 		commits, err := fetchGithubComparedCommits(apiClient, repoFullName, baseSHA, headSHA)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
+		matchedCurrentDeployment := false
 		for _, commit := range commits {
 			title := githubCommitTitle(commit.Commit.Message)
 			prNumber, ok := githubMergeCommitPRNumber(title)
@@ -983,12 +988,16 @@ func findGithubDeploymentIncludedPRNumbers(
 				continue
 			}
 			logger.Info("==== found deployments %s included %s ===", current.deployment.Name, prNumber)
+			matchedCurrentDeployment = true
 			if parsedPRNumber, err := strconv.Atoi(prNumber); err == nil {
 				includedPRNumbers[parsedPRNumber] = struct{}{}
 			}
 		}
+		if matchedCurrentDeployment {
+			includedDeploymentIds[current.deployment.Id] = struct{}{}
+		}
 	}
-	return githubSortedPRNumbers(includedPRNumbers), nil
+	return githubSortedPRNumbers(includedPRNumbers), includedDeploymentIds, nil
 }
 
 func githubCommitTitleMatchesAnyTeamPrefix(title string, teamPrefixes []string) bool {

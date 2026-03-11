@@ -27,6 +27,10 @@ import (
 )
 
 func resolvePullRequestId(connection *models.WebhookConnection, pullRequestId string, pullRequestKey *int) (string, errors.Error) {
+	return resolvePullRequestIdWithDal(basicRes.GetDal(), connection, pullRequestId, pullRequestKey)
+}
+
+func resolvePullRequestIdWithDal(db dal.Dal, connection *models.WebhookConnection, pullRequestId string, pullRequestKey *int) (string, errors.Error) {
 	if pullRequestId != "" {
 		return pullRequestId, nil
 	}
@@ -35,14 +39,14 @@ func resolvePullRequestId(connection *models.WebhookConnection, pullRequestId st
 	}
 
 	pr := &code.PullRequest{}
-	err := basicRes.GetDal().First(
+	err := db.First(
 		pr,
 		dal.From(&code.PullRequest{}),
 		dal.Select("id"),
 		dal.Where("base_repo_id = ? AND pull_request_key = ?", fmt.Sprintf("%s:%d", pluginName, connection.ID), *pullRequestKey),
 	)
 	if err != nil {
-		if basicRes.GetDal().IsErrorNotFound(err) {
+		if db.IsErrorNotFound(err) {
 			return "", errors.NotFound.New(fmt.Sprintf("pull request not found for key %d", *pullRequestKey))
 		}
 		return "", err

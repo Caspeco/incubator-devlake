@@ -89,7 +89,7 @@ func CreatePullRequestComment(connection *models.WebhookConnection, request *Web
 	if request == nil {
 		return errors.BadInput.New("request body is nil")
 	}
-	pullRequestId, err := resolvePullRequestId(connection, request.PullRequestId, request.PullRequestKey)
+	pullRequestId, err := resolvePullRequestIdWithDal(tx, connection, request.PullRequestId, request.PullRequestKey)
 	if err != nil {
 		return err
 	}
