@@ -58,8 +58,57 @@ func TestWorkflowTargetsProd(t *testing.T) {
 	if !workflowTargetsProd("ANALYS Build & Publish Analytics Dump prod") {
 		t.Fatal("expected workflow ending in prod to be detected as production")
 	}
+	if !workflowTargetsProd("Deploy prd") {
+		t.Fatal("expected prd suffix to be detected as production")
+	}
+	if !workflowTargetsProd("Release produciton") {
+		t.Fatal("expected common production typo to be detected as production")
+	}
 	if workflowTargetsProd("Deploy staging") {
 		t.Fatal("did not expect staging workflow to be detected as production")
+	}
+}
+
+func TestDeploymentTargetsProd(t *testing.T) {
+	if !deploymentTargetsProd("prod") {
+		t.Fatal("expected prod environment to be treated as production")
+	}
+	if !deploymentTargetsProd("produciton") {
+		t.Fatal("expected common production typo to be treated as production")
+	}
+	if !deploymentTargetsProd("prd") {
+		t.Fatal("expected prd abbreviation to be treated as production")
+	}
+	if deploymentTargetsProd("staging") {
+		t.Fatal("did not expect staging environment to be treated as production")
+	}
+}
+
+func TestFilterGithubWorkflowsByNameUsesExactMatchesOnly(t *testing.T) {
+	workflows := []githubWorkflowResponse{
+		{Name: "ANALYS Build & Publish Analytics Dump prod"},
+		{Name: "🚀 Deploy Production"},
+		{Name: "Release prod"},
+	}
+
+	filtered := filterGithubWorkflowsByName(workflows, []string{"ANALYS Build & Publish Analytics Dump prod"})
+	if len(filtered) != 1 {
+		t.Fatalf("expected 1 exact matched workflow, got %d", len(filtered))
+	}
+	if filtered[0].Name != "ANALYS Build & Publish Analytics Dump prod" {
+		t.Fatalf("unexpected filtered workflows: %+v", filtered)
+	}
+}
+
+func TestFilterGithubWorkflowsByNameWithEmptyRequestedReturnsNothing(t *testing.T) {
+	workflows := []githubWorkflowResponse{
+		{Name: "ANALYS Build & Publish Analytics Dump prod"},
+		{Name: "🚀 Deploy Production"},
+	}
+
+	filtered := filterGithubWorkflowsByName(workflows, nil)
+	if len(filtered) != 0 {
+		t.Fatalf("expected no workflows when none were configured, got %d", len(filtered))
 	}
 }
 
@@ -97,6 +146,7 @@ func TestBuildWebhookDeploymentUsesAssociatedPRs(t *testing.T) {
 			CreatedAt:    &runCreatedAt,
 			RunStartedAt: &startedAt,
 			UpdatedAt:    &finishedAt,
+			HTMLURL:      "https://github.com/org/repo/actions/runs/1001",
 		},
 		[]githubSelectedPullRequest{
 			{
@@ -118,8 +168,14 @@ func TestBuildWebhookDeploymentUsesAssociatedPRs(t *testing.T) {
 	if len(deployment.DeploymentCommits) != 1 {
 		t.Fatalf("expected one deployment commit, got %d", len(deployment.DeploymentCommits))
 	}
+	if deployment.Url != "https://github.com/org/repo/actions/runs/1001" {
+		t.Fatalf("expected deployment url to be propagated, got %s", deployment.Url)
+	}
 	if deployment.DeploymentCommits[0].CommitSha != "merge-sha-7" {
 		t.Fatalf("expected deployment commit sha merge-sha-7, got %s", deployment.DeploymentCommits[0].CommitSha)
+	}
+	if deployment.DeploymentCommits[0].Url != "https://github.com/org/repo/actions/runs/1001" {
+		t.Fatalf("expected deployment commit url to be propagated, got %s", deployment.DeploymentCommits[0].Url)
 	}
 }
 
@@ -172,5 +228,138 @@ func TestDeploymentIsIncludedOnlyWhenItsCompareRangeContainsMatchedPR(t *testing
 	}
 	if deployments[0].Id != "github-workflow-1-run-2" {
 		t.Fatalf("unexpected deployment selected: %s", deployments[0].Id)
+	}
+}
+
+func TestDeploymentPRLinksDeduplicatePerDeploymentAndPR(t *testing.T) {
+	deploymentLinksByID := map[string][]githubDeploymentPRLink{}
+	seenPRsForDeployment := map[int]struct{}{}
+	commits := []githubCompareCommitResponse{
+		{SHA: "sha-1", Commit: struct{ Message string `json:"message"` }{Message: "AIR-1 first merge (#101)"}},
+		{SHA: "sha-2", Commit: struct{ Message string `json:"message"` }{Message: "AIR-1 duplicate mention (#101)"}},
+		{SHA: "sha-3", Commit: struct{ Message string `json:"message"` }{Message: "AIR-2 second merge (#102)"}},
+	}
+
+	for _, commit := range commits {
+		title := githubCommitTitle(commit.Commit.Message)
+		prNumber, ok := githubMergeCommitPRNumber(title)
+		if !ok || !githubCommitTitleMatchesAnyTeamPrefix(title, []string{"AIR"}) {
+			continue
+		}
+		parsedPRNumber := 0
+		switch prNumber {
+		case "101":
+			parsedPRNumber = 101
+		case "102":
+			parsedPRNumber = 102
+		}
+		if _, exists := seenPRsForDeployment[parsedPRNumber]; exists {
+			continue
+		}
+		seenPRsForDeployment[parsedPRNumber] = struct{}{}
+		deploymentLinksByID["dep-1"] = append(deploymentLinksByID["dep-1"], githubDeploymentPRLink{
+			DeploymentId:     "dep-1",
+			PullRequestKey:   parsedPRNumber,
+			MatchedCommitSha: commit.SHA,
+		})
+	}
+
+	links := deploymentLinksByID["dep-1"]
+	if len(links) != 2 {
+		t.Fatalf("expected 2 unique deployment PR links, got %d", len(links))
+	}
+	if links[0].PullRequestKey != 101 || links[0].MatchedCommitSha != "sha-1" {
+		t.Fatalf("unexpected first link: %+v", links[0])
+	}
+	if links[1].PullRequestKey != 102 || links[1].MatchedCommitSha != "sha-3" {
+		t.Fatalf("unexpected second link: %+v", links[1])
+	}
+}
+
+func TestApplyNewestPullRequestTitleToDeployments(t *testing.T) {
+	deployments := []webhookapi.WebhookDeploymentReq{
+		{
+			Id:           "dep-1",
+			DisplayTitle: "deploy",
+			DeploymentCommits: []webhookapi.WebhookDeploymentCommitReq{
+				{DisplayTitle: "deploy", CommitMsg: "deploy"},
+			},
+		},
+	}
+	links := []githubDeploymentPRLink{
+		{DeploymentId: "dep-1", PullRequestKey: 101, MatchedCommitSha: "sha-1"},
+		{DeploymentId: "dep-1", PullRequestKey: 102, MatchedCommitSha: "sha-2"},
+	}
+	selectedPRs := []githubSelectedPullRequest{
+		{pr: githubPullRequestResponse{Number: 101, Title: "LONII-100 older change"}},
+		{pr: githubPullRequestResponse{Number: 102, Title: "LONII-101 newest change"}},
+	}
+
+	applyNewestPullRequestTitleToDeployments(deployments, links, selectedPRs)
+
+	if deployments[0].DisplayTitle != "LONII-101 newest change" {
+		t.Fatalf("expected newest PR title on deployment, got %s", deployments[0].DisplayTitle)
+	}
+	if deployments[0].DeploymentCommits[0].DisplayTitle != "LONII-101 newest change" {
+		t.Fatalf("expected newest PR title on deployment commit, got %s", deployments[0].DeploymentCommits[0].DisplayTitle)
+	}
+	if deployments[0].DeploymentCommits[0].CommitMsg != "PR #102 LONII-101 newest change" {
+		t.Fatalf("unexpected deployment commit message: %s", deployments[0].DeploymentCommits[0].CommitMsg)
+	}
+}
+
+func TestSameShaDeploymentCarriesPreviousMatchedPRsForward(t *testing.T) {
+	sha := "same-sha"
+	candidates := []githubDeploymentCandidate{
+		{
+			deployment: webhookapi.WebhookDeploymentReq{
+				Id: "dep-1",
+				DeploymentCommits: []webhookapi.WebhookDeploymentCommitReq{
+					{CommitSha: sha},
+				},
+			},
+		},
+		{
+			deployment: webhookapi.WebhookDeploymentReq{
+				Id: "dep-2",
+				DeploymentCommits: []webhookapi.WebhookDeploymentCommitReq{
+					{CommitSha: sha},
+				},
+			},
+		},
+	}
+
+	includedPRNumbers := map[int]struct{}{101: {}}
+	includedDeploymentIds := map[string]struct{}{"dep-1": {}}
+	deploymentLinksById := map[string][]githubDeploymentPRLink{
+		"dep-1": {
+			{DeploymentId: "dep-1", PullRequestKey: 101, MatchedCommitSha: "merge-sha-101"},
+		},
+	}
+
+	baseSHA := githubPrimaryDeploymentCommitSHA(candidates[0].deployment)
+	headSHA := githubPrimaryDeploymentCommitSHA(candidates[1].deployment)
+	if baseSHA != headSHA {
+		t.Fatalf("expected same deployment sha, got %s and %s", baseSHA, headSHA)
+	}
+	for _, link := range deploymentLinksById[candidates[0].deployment.Id] {
+		includedPRNumbers[link.PullRequestKey] = struct{}{}
+		deploymentLinksById[candidates[1].deployment.Id] = append(deploymentLinksById[candidates[1].deployment.Id], githubDeploymentPRLink{
+			DeploymentId:     candidates[1].deployment.Id,
+			PullRequestKey:   link.PullRequestKey,
+			MatchedCommitSha: link.MatchedCommitSha,
+		})
+	}
+	includedDeploymentIds[candidates[1].deployment.Id] = struct{}{}
+
+	if _, ok := includedDeploymentIds["dep-2"]; !ok {
+		t.Fatal("expected second deployment to be included")
+	}
+	links := deploymentLinksById["dep-2"]
+	if len(links) != 1 {
+		t.Fatalf("expected one carried deployment link, got %d", len(links))
+	}
+	if links[0].PullRequestKey != 101 || links[0].MatchedCommitSha != "merge-sha-101" {
+		t.Fatalf("unexpected carried link: %+v", links[0])
 	}
 }

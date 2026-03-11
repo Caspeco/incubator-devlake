@@ -33,6 +33,7 @@ import (
 	"github.com/apache/incubator-devlake/core/plugin"
 	"github.com/apache/incubator-devlake/helpers/dbhelper"
 	helper "github.com/apache/incubator-devlake/helpers/pluginhelper/api"
+	doramodels "github.com/apache/incubator-devlake/plugins/dora/models"
 	"github.com/apache/incubator-devlake/plugins/github/models"
 	webhookapi "github.com/apache/incubator-devlake/plugins/webhook/api"
 	webhookmodels "github.com/apache/incubator-devlake/plugins/webhook/models"
@@ -84,8 +85,15 @@ type githubWebhookPreparedExport struct {
 	pullRequestCommits  []webhookapi.WebhookPullRequestCommitReq
 	pullRequestComments []webhookapi.WebhookPullRequestCommentReq
 	deployments         []webhookapi.WebhookDeploymentReq
+	deploymentPRLinks   []githubDeploymentPRLink
 	calls               []GithubWebhookPreparedCall
 	warnings            []string
+}
+
+type githubDeploymentPRLink struct {
+	DeploymentId     string
+	PullRequestKey   int
+	MatchedCommitSha string
 }
 
 type githubRepoResponse struct {
@@ -199,6 +207,26 @@ type githubRunResponse struct {
 	PullRequests []githubRunPRRef `json:"pull_requests"`
 }
 
+type githubRepoDeploymentResponse struct {
+	ID          int        `json:"id"`
+	SHA         string     `json:"sha"`
+	Ref         string     `json:"ref"`
+	Task        string     `json:"task"`
+	Environment string     `json:"environment"`
+	CreatedAt   *time.Time `json:"created_at"`
+	UpdatedAt   *time.Time `json:"updated_at"`
+}
+
+type githubRepoDeploymentStatusResponse struct {
+	ID             int        `json:"id"`
+	State          string     `json:"state"`
+	Environment    string     `json:"environment"`
+	EnvironmentURL string     `json:"environment_url"`
+	LogURL         string     `json:"log_url"`
+	CreatedAt      *time.Time `json:"created_at"`
+	UpdatedAt      *time.Time `json:"updated_at"`
+}
+
 type githubCompareResponse struct {
 	Commits []githubCompareCommitResponse `json:"commits"`
 }
@@ -218,6 +246,8 @@ type githubSelectedPullRequest struct {
 type githubDeploymentCandidate struct {
 	workflow   githubWorkflowResponse
 	run        githubRunResponse
+	deploymentData *githubRepoDeploymentResponse
+	statusData     *githubRepoDeploymentStatusResponse
 	deployment webhookapi.WebhookDeploymentReq
 }
 
@@ -316,21 +346,25 @@ func prepareGithubWebhookExport(apiClient plugin.ApiClient, req *GithubWebhookEx
 	logger.Info("fetched github repo metadata: repo=%s repoId=%d defaultBranch=%s", repo.FullName, repo.ID, repo.DefaultBranch)
 
 	export := &githubWebhookPreparedExport{}
-	deployments, includedPRNumbers, warnings, err := fetchGithubDeployments(apiClient, req, repo, normalizedTeamPrefixes, lookbackSince)
+	deployments, includedPRNumbers, deploymentPRLinks, warnings, err := fetchGithubDeployments(apiClient, req, repo, normalizedTeamPrefixes, lookbackSince)
 	if err != nil {
 		return nil, err
 	}
+	export.deploymentPRLinks = deploymentPRLinks
 	export.warnings = append(export.warnings, warnings...)
 	for _, deployment := range deployments {
 		export.deployments = append(export.deployments, deployment)
-		if err := export.addCall("deployment", req.WebhookConnectionId, "deployments", deployment); err != nil {
-			return nil, err
-		}
 	}
 
 	selectedPRs, err := fetchGithubPullRequestsByNumbers(apiClient, req.RepoFullName, includedPRNumbers)
 	if err != nil {
 		return nil, err
+	}
+	applyNewestPullRequestTitleToDeployments(export.deployments, export.deploymentPRLinks, selectedPRs)
+	for _, deployment := range export.deployments {
+		if err := export.addCall("deployment", req.WebhookConnectionId, "deployments", deployment); err != nil {
+			return nil, err
+		}
 	}
 	logger.Info("selected %d merged pull requests for export from repo=%s using deployment comparison", len(selectedPRs), req.RepoFullName)
 
@@ -431,6 +465,24 @@ func submitGithubWebhookExport(connection *webhookmodels.WebhookConnection, expo
 	}
 	for i := range export.deployments {
 		if err := webhookapi.CreateDeploymentAndDeploymentCommits(connection, &export.deployments[i], tx, logger); err != nil {
+			return err
+		}
+	}
+	for i := range export.deploymentPRLinks {
+		link := export.deploymentPRLinks[i]
+		deploymentCommitId, ok := export.findDeploymentCommitId(connection.ID, link.DeploymentId)
+		if !ok {
+			return errors.Default.New(fmt.Sprintf("deployment commit not found for deployment %s", link.DeploymentId))
+		}
+		record := &doramodels.DeploymentCommitPullRequest{
+			ProjectName:        connection.Name,
+			DeploymentCommitId: deploymentCommitId,
+			PullRequestId:      fmt.Sprintf("webhook:%d:%d", connection.ID, link.PullRequestKey),
+			MatchedCommitSha:   link.MatchedCommitSha,
+			PullRequestKey:     link.PullRequestKey,
+			DetectionMethod:    "github_webhook_export_compare",
+		}
+		if err := tx.CreateOrUpdate(record); err != nil {
 			return err
 		}
 	}
@@ -578,14 +630,60 @@ func fetchGithubDeployments(
 	repo *githubRepoResponse,
 	teamPrefixes []string,
 	lookbackSince time.Time,
-) ([]webhookapi.WebhookDeploymentReq, []int, []string, errors.Error) {
+) ([]webhookapi.WebhookDeploymentReq, []int, []githubDeploymentPRLink, []string, errors.Error) {
 	var deployments []webhookapi.WebhookDeploymentReq
 	var candidates []githubDeploymentCandidate
+	var deploymentPRLinks []githubDeploymentPRLink
 	var warnings []string
 	logger := basicRes.GetLogger()
+
+	githubDeployments, err := fetchGithubRepoDeployments(apiClient, req.RepoFullName)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	logger.Info("scanned github deployments: repo=%s deployments=%d", req.RepoFullName, len(githubDeployments))
+	for _, deploymentData := range githubDeployments {
+		if deploymentData.CreatedAt != nil && deploymentData.CreatedAt.Before(lookbackSince) {
+			continue
+		}
+		if !deploymentTargetsProd(deploymentData.Environment) {
+			continue
+		}
+		statuses, err := fetchGithubRepoDeploymentStatuses(apiClient, req.RepoFullName, deploymentData.ID)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+		status, ok := latestSuccessfulGithubDeploymentStatus(statuses)
+		if !ok {
+			logger.Info(
+				"skipping github deployment because no successful status was found: deploymentId=%d environment=%s statuses=%d",
+				deploymentData.ID,
+				deploymentData.Environment,
+				len(statuses),
+			)
+			continue
+		}
+		deployment := buildWebhookDeploymentFromGithubDeployment(repo, deploymentData, status)
+		if len(deployment.DeploymentCommits) == 0 {
+			warnings = append(warnings, fmt.Sprintf("skipped github deployment %d because no deployment commit could be constructed", deploymentData.ID))
+			continue
+		}
+		candidates = append(candidates, githubDeploymentCandidate{
+			deploymentData: &deploymentData,
+			statusData:     &status,
+			deployment:     deployment,
+		})
+		logger.Info(
+			"matched github deployment for export: deploymentId=%d environment=%s deploymentCommits=%d",
+			deploymentData.ID,
+			deploymentData.Environment,
+			len(deployment.DeploymentCommits),
+		)
+	}
+
 	workflows, err := fetchGithubWorkflows(apiClient, req.RepoFullName)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	targetWorkflows := filterGithubWorkflowsByName(workflows, req.DeploymentWorkflowNames)
 	logger.Info(
@@ -594,15 +692,14 @@ func fetchGithubDeployments(
 		strings.Join(req.DeploymentWorkflowNames, ", "),
 		joinGithubWorkflowNames(targetWorkflows),
 	)
-	if len(targetWorkflows) == 0 {
+	if len(targetWorkflows) == 0 && len(req.DeploymentWorkflowNames) > 0 {
 		warnings = append(warnings, fmt.Sprintf("no workflows matched requested deployment workflow names: %s", strings.Join(req.DeploymentWorkflowNames, ", ")))
-		return deployments, nil, warnings, nil
 	}
 
 	for _, workflow := range targetWorkflows {
 		workflowRuns, err := fetchGithubWorkflowRuns(apiClient, req.RepoFullName, workflow.ID, lookbackSince)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 		logger.Info("scanned github workflow runs: repo=%s workflow=%s runs=%d", req.RepoFullName, workflow.Name, len(workflowRuns))
 		for _, run := range workflowRuns {
@@ -646,17 +743,18 @@ func fetchGithubDeployments(
 		}
 	}
 	sortGithubDeploymentCandidates(candidates)
-	includedPRNumbers, includedDeploymentIds, err := findGithubDeploymentIncludedPRNumbers(apiClient, req.RepoFullName, teamPrefixes, candidates)
+	includedPRNumbers, includedDeploymentIds, deploymentLinksById, err := findGithubDeploymentIncludedPRNumbers(apiClient, req.RepoFullName, teamPrefixes, candidates)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	for _, candidate := range candidates {
 		if _, ok := includedDeploymentIds[candidate.deployment.Id]; !ok {
 			continue
 		}
 		deployments = append(deployments, candidate.deployment)
+		deploymentPRLinks = append(deploymentPRLinks, deploymentLinksById[candidate.deployment.Id]...)
 	}
-	return deployments, includedPRNumbers, warnings, nil
+	return deployments, includedPRNumbers, deploymentPRLinks, warnings, nil
 }
 
 func fetchGithubWorkflows(apiClient plugin.ApiClient, repoFullName string) ([]githubWorkflowResponse, errors.Error) {
@@ -680,14 +778,60 @@ func fetchGithubWorkflows(apiClient plugin.ApiClient, repoFullName string) ([]gi
 	return workflows, nil
 }
 
+func fetchGithubRepoDeployments(apiClient plugin.ApiClient, repoFullName string) ([]githubRepoDeploymentResponse, errors.Error) {
+	var deployments []githubRepoDeploymentResponse
+	page := 1
+	for {
+		query := url.Values{
+			"page":     []string{fmt.Sprintf("%d", page)},
+			"per_page": []string{fmt.Sprintf("%d", githubWebhookExportPageSize)},
+		}
+		var batch []githubRepoDeploymentResponse
+		if err := githubApiGetAndUnmarshalWithRetry(apiClient, fmt.Sprintf("repos/%s/deployments", repoFullName), query, &batch); err != nil {
+			return nil, err
+		}
+		deployments = append(deployments, batch...)
+		if len(batch) < githubWebhookExportPageSize {
+			break
+		}
+		page++
+	}
+	return deployments, nil
+}
+
+func fetchGithubRepoDeploymentStatuses(apiClient plugin.ApiClient, repoFullName string, deploymentID int) ([]githubRepoDeploymentStatusResponse, errors.Error) {
+	var statuses []githubRepoDeploymentStatusResponse
+	page := 1
+	for {
+		query := url.Values{
+			"page":     []string{fmt.Sprintf("%d", page)},
+			"per_page": []string{fmt.Sprintf("%d", githubWebhookExportPageSize)},
+		}
+		var batch []githubRepoDeploymentStatusResponse
+		if err := githubApiGetAndUnmarshalWithRetry(apiClient, fmt.Sprintf("repos/%s/deployments/%d/statuses", repoFullName, deploymentID), query, &batch); err != nil {
+			return nil, err
+		}
+		statuses = append(statuses, batch...)
+		if len(batch) < githubWebhookExportPageSize {
+			break
+		}
+		page++
+	}
+	return statuses, nil
+}
+
 func filterGithubWorkflowsByName(workflows []githubWorkflowResponse, requested []string) []githubWorkflowResponse {
 	requestedNames := make(map[string]struct{}, len(requested))
 	for _, name := range requested {
-		requestedNames[strings.TrimSpace(name)] = struct{}{}
+		trimmed := strings.TrimSpace(name)
+		if trimmed == "" {
+			continue
+		}
+		requestedNames[trimmed] = struct{}{}
 	}
 	var matches []githubWorkflowResponse
 	for _, workflow := range workflows {
-		if _, ok := requestedNames[workflow.Name]; ok || workflowTargetsProd(workflow.Name) {
+		if _, ok := requestedNames[workflow.Name]; ok {
 			matches = append(matches, workflow)
 		}
 	}
@@ -843,6 +987,7 @@ func buildWebhookDeployment(
 	deployment := webhookapi.WebhookDeploymentReq{
 		Id:           fmt.Sprintf("github-workflow-%d-run-%d", workflow.ID, run.ID),
 		DisplayTitle: firstNonEmpty(run.DisplayTitle, workflow.Name, run.Name),
+		Url:          run.HTMLURL,
 		Result:       mapGithubConclusionToWebhookResult(run.Conclusion),
 		Environment:  "PRODUCTION",
 		Name:         firstNonEmpty(workflow.Name, run.DisplayTitle, run.Name),
@@ -855,6 +1000,7 @@ func buildWebhookDeployment(
 		if commitSha != "" {
 			deployment.DeploymentCommits = append(deployment.DeploymentCommits, webhookapi.WebhookDeploymentCommitReq{
 				DisplayTitle: firstNonEmpty(run.DisplayTitle, workflow.Name, run.Name),
+				Url:          run.HTMLURL,
 				RepoUrl:      firstNonEmpty(repo.CloneURL, repo.HTMLURL),
 				Name:         fmt.Sprintf("%s run-%d", workflow.Name, run.ID),
 				RefName:      firstNonEmpty(run.HeadBranch, repo.DefaultBranch),
@@ -876,6 +1022,7 @@ func buildWebhookDeployment(
 		}
 		deployment.DeploymentCommits = append(deployment.DeploymentCommits, webhookapi.WebhookDeploymentCommitReq{
 			DisplayTitle: fmt.Sprintf("%s for PR #%d %s", workflow.Name, pr.pr.Number, pr.pr.Title),
+			Url:          run.HTMLURL,
 			RepoUrl:      firstNonEmpty(repo.CloneURL, repo.HTMLURL),
 			Name:         fmt.Sprintf("%s for pr-%d", workflow.Name, pr.pr.Number),
 			RefName:      firstNonEmpty(pr.pr.Base.Ref, run.HeadBranch, repo.DefaultBranch),
@@ -891,11 +1038,61 @@ func buildWebhookDeployment(
 	return deployment
 }
 
+func buildWebhookDeploymentFromGithubDeployment(
+	repo *githubRepoResponse,
+	deploymentData githubRepoDeploymentResponse,
+	status githubRepoDeploymentStatusResponse,
+) webhookapi.WebhookDeploymentReq {
+	startedAt := firstNonNilTime(status.CreatedAt, deploymentData.CreatedAt, deploymentData.UpdatedAt)
+	finishedAt := firstNonNilTime(status.UpdatedAt, status.CreatedAt, deploymentData.UpdatedAt, deploymentData.CreatedAt)
+	displayTitle := firstNonEmpty(deploymentData.Task, deploymentData.Environment, deploymentData.Ref, deploymentData.SHA)
+	deploymentURL := firstNonEmpty(status.LogURL, status.EnvironmentURL)
+	deployment := webhookapi.WebhookDeploymentReq{
+		Id:           fmt.Sprintf("github-deployment-%d", deploymentData.ID),
+		DisplayTitle: displayTitle,
+		Url:          deploymentURL,
+		Result:       mapGithubDeploymentStatusToWebhookResult(status.State),
+		Environment:  "PRODUCTION",
+		Name:         firstNonEmpty(deploymentData.Task, deploymentData.Environment, deploymentData.Ref, fmt.Sprintf("deployment-%d", deploymentData.ID)),
+		CreatedDate:  firstNonNilTime(deploymentData.CreatedAt, startedAt, finishedAt),
+		StartedDate:  startedAt,
+		FinishedDate: finishedAt,
+	}
+	if strings.TrimSpace(deploymentData.SHA) != "" {
+		deployment.DeploymentCommits = append(deployment.DeploymentCommits, webhookapi.WebhookDeploymentCommitReq{
+			DisplayTitle: displayTitle,
+			Url:          deploymentURL,
+			RepoUrl:      firstNonEmpty(repo.CloneURL, repo.HTMLURL),
+			Name:         firstNonEmpty(deploymentData.Task, fmt.Sprintf("deployment-%d", deploymentData.ID)),
+			RefName:      firstNonEmpty(deploymentData.Ref, repo.DefaultBranch),
+			CommitSha:    deploymentData.SHA,
+			CommitMsg:    firstNonEmpty(deploymentData.Task, deploymentData.Environment, deploymentData.Ref),
+			Result:       mapGithubDeploymentStatusToWebhookResult(status.State),
+			Status:       "DONE",
+			CreatedDate:  firstNonNilTime(deploymentData.CreatedAt, startedAt, finishedAt),
+			StartedDate:  startedAt,
+			FinishedDate: finishedAt,
+		})
+	}
+	return deployment
+}
+
 func mapGithubConclusionToWebhookResult(conclusion string) string {
 	switch strings.ToLower(conclusion) {
 	case "success", "neutral", "skipped":
 		return "SUCCESS"
 	case "cancelled":
+		return "CANCELLED"
+	default:
+		return "FAILURE"
+	}
+}
+
+func mapGithubDeploymentStatusToWebhookResult(state string) string {
+	switch strings.ToLower(state) {
+	case "success":
+		return "SUCCESS"
+	case "inactive":
 		return "CANCELLED"
 	default:
 		return "FAILURE"
@@ -925,8 +1122,38 @@ func workflowTargetsProd(value string) bool {
 	return strings.Contains(normalized, " prod") ||
 		strings.Contains(normalized, "-prod") ||
 		strings.Contains(normalized, "_prod") ||
+		strings.Contains(normalized, " prd") ||
+		strings.Contains(normalized, "-prd") ||
+		strings.Contains(normalized, "_prd") ||
 		strings.HasSuffix(normalized, "prod") ||
-		strings.Contains(normalized, "production")
+		strings.HasSuffix(normalized, "prd") ||
+		strings.Contains(normalized, "production") ||
+		strings.Contains(normalized, "produciton")
+}
+
+func deploymentTargetsProd(value string) bool {
+	return workflowTargetsProd(value)
+}
+
+func latestSuccessfulGithubDeploymentStatus(statuses []githubRepoDeploymentStatusResponse) (githubRepoDeploymentStatusResponse, bool) {
+	var latest githubRepoDeploymentStatusResponse
+	found := false
+	for _, status := range statuses {
+		if strings.ToLower(status.State) != "success" {
+			continue
+		}
+		if !found {
+			latest = status
+			found = true
+			continue
+		}
+		currentTime := firstNonNilTime(status.UpdatedAt, status.CreatedAt)
+		latestTime := firstNonNilTime(latest.UpdatedAt, latest.CreatedAt)
+		if currentTime != nil && latestTime != nil && currentTime.After(*latestTime) {
+			latest = status
+		}
+	}
+	return latest, found
 }
 
 func sortGithubDeploymentCandidates(candidates []githubDeploymentCandidate) {
@@ -949,17 +1176,54 @@ func githubDeploymentExecutionTime(deployment webhookapi.WebhookDeploymentReq) t
 	return time.Time{}
 }
 
+func applyNewestPullRequestTitleToDeployments(
+	deployments []webhookapi.WebhookDeploymentReq,
+	deploymentPRLinks []githubDeploymentPRLink,
+	selectedPRs []githubSelectedPullRequest,
+) {
+	if len(deployments) == 0 || len(deploymentPRLinks) == 0 || len(selectedPRs) == 0 {
+		return
+	}
+	prByNumber := make(map[int]githubSelectedPullRequest, len(selectedPRs))
+	for _, selected := range selectedPRs {
+		prByNumber[selected.pr.Number] = selected
+	}
+	newestPRByDeploymentID := make(map[string]githubSelectedPullRequest)
+	for _, link := range deploymentPRLinks {
+		selected, ok := prByNumber[link.PullRequestKey]
+		if !ok {
+			continue
+		}
+		// deploymentPRLinks are appended in compare order, so the last seen PR for a
+		// deployment is the newest matched merge commit in that deployment range.
+		newestPRByDeploymentID[link.DeploymentId] = selected
+	}
+	for index := range deployments {
+		selected, ok := newestPRByDeploymentID[deployments[index].Id]
+		if !ok {
+			continue
+		}
+		title := selected.pr.Title
+		deployments[index].DisplayTitle = title
+		if len(deployments[index].DeploymentCommits) > 0 {
+			deployments[index].DeploymentCommits[0].DisplayTitle = title
+			deployments[index].DeploymentCommits[0].CommitMsg = fmt.Sprintf("PR #%d %s", selected.pr.Number, selected.pr.Title)
+		}
+	}
+}
+
 func findGithubDeploymentIncludedPRNumbers(
 	apiClient plugin.ApiClient,
 	repoFullName string,
 	teamPrefixes []string,
 	candidates []githubDeploymentCandidate,
-) ([]int, map[string]struct{}, errors.Error) {
+) ([]int, map[string]struct{}, map[string][]githubDeploymentPRLink, errors.Error) {
 	logger := basicRes.GetLogger()
 	includedPRNumbers := make(map[int]struct{})
 	includedDeploymentIds := make(map[string]struct{})
+	deploymentLinksById := make(map[string][]githubDeploymentPRLink)
 	if len(candidates) < 2 || len(teamPrefixes) == 0 {
-		return nil, includedDeploymentIds, nil
+		return nil, includedDeploymentIds, deploymentLinksById, nil
 	}
 	for index := 1; index < len(candidates); index++ {
 		previous := candidates[index-1]
@@ -976,11 +1240,41 @@ func findGithubDeploymentIncludedPRNumbers(
 			)
 			continue
 		}
+		if baseSHA == headSHA {
+			previousLinks, ok := deploymentLinksById[previous.deployment.Id]
+			if !ok || len(previousLinks) == 0 {
+				logger.Info(
+					"skipping deployment comparison because consecutive deployments point to the same commit without prior matched PRs: previous=%s current=%s sha=%s",
+					previous.deployment.Name,
+					current.deployment.Name,
+					headSHA,
+				)
+				continue
+			}
+			for _, link := range previousLinks {
+				includedPRNumbers[link.PullRequestKey] = struct{}{}
+				deploymentLinksById[current.deployment.Id] = append(deploymentLinksById[current.deployment.Id], githubDeploymentPRLink{
+					DeploymentId:     current.deployment.Id,
+					PullRequestKey:   link.PullRequestKey,
+					MatchedCommitSha: link.MatchedCommitSha,
+				})
+			}
+			includedDeploymentIds[current.deployment.Id] = struct{}{}
+			logger.Info(
+				"carried deployment PR matches forward because consecutive deployments point to the same commit: previous=%s current=%s sha=%s prs=%d",
+				previous.deployment.Name,
+				current.deployment.Name,
+				headSHA,
+				len(previousLinks),
+			)
+			continue
+		}
 		commits, err := fetchGithubComparedCommits(apiClient, repoFullName, baseSHA, headSHA)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		matchedCurrentDeployment := false
+		seenPRsForDeployment := make(map[int]struct{})
 		for _, commit := range commits {
 			title := githubCommitTitle(commit.Commit.Message)
 			prNumber, ok := githubMergeCommitPRNumber(title)
@@ -991,13 +1285,21 @@ func findGithubDeploymentIncludedPRNumbers(
 			matchedCurrentDeployment = true
 			if parsedPRNumber, err := strconv.Atoi(prNumber); err == nil {
 				includedPRNumbers[parsedPRNumber] = struct{}{}
+				if _, exists := seenPRsForDeployment[parsedPRNumber]; !exists {
+					seenPRsForDeployment[parsedPRNumber] = struct{}{}
+					deploymentLinksById[current.deployment.Id] = append(deploymentLinksById[current.deployment.Id], githubDeploymentPRLink{
+						DeploymentId:     current.deployment.Id,
+						PullRequestKey:   parsedPRNumber,
+						MatchedCommitSha: commit.SHA,
+					})
+				}
 			}
 		}
 		if matchedCurrentDeployment {
 			includedDeploymentIds[current.deployment.Id] = struct{}{}
 		}
 	}
-	return githubSortedPRNumbers(includedPRNumbers), includedDeploymentIds, nil
+	return githubSortedPRNumbers(includedPRNumbers), includedDeploymentIds, deploymentLinksById, nil
 }
 
 func githubCommitTitleMatchesAnyTeamPrefix(title string, teamPrefixes []string) bool {
@@ -1081,6 +1383,21 @@ func (e *githubWebhookPreparedExport) addCall(entity string, webhookConnectionId
 		Payload:  body,
 	})
 	return nil
+}
+
+func (e *githubWebhookPreparedExport) findDeploymentCommitId(connectionID uint64, deploymentID string) (string, bool) {
+	for i := range e.deployments {
+		deployment := e.deployments[i]
+		if deployment.Id != deploymentID || len(deployment.DeploymentCommits) == 0 {
+			continue
+		}
+		commit := deployment.DeploymentCommits[0]
+		if strings.TrimSpace(commit.RepoUrl) == "" || strings.TrimSpace(commit.CommitSha) == "" {
+			return "", false
+		}
+		return webhookapi.GenerateDeploymentCommitId(connectionID, deployment.Id, commit.RepoUrl, commit.CommitSha), true
+	}
+	return "", false
 }
 
 func toBodyMap(payload interface{}) (map[string]interface{}, errors.Error) {

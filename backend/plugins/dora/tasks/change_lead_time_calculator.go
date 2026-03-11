@@ -210,9 +210,17 @@ func getFirstReview(prId string, prCreator string, db dal.Dal) (*code.PullReques
 // getDeploymentCommit takes a merge commit SHA, a repository ID, a list of deployment pairs, and a database connection as input.
 // It returns the deployment pair related to the merge commit, or nil if not found.
 func getDeploymentCommit(mergeSha string, projectName string, db dal.Dal) (*devops.CicdDeploymentCommit, errors.Error) {
+	deployment, err := getDeploymentCommitByAutodetectedPr(mergeSha, projectName, db)
+	if err != nil {
+		return nil, err
+	}
+	if deployment != nil {
+		return deployment, nil
+	}
+
 	deploymentCommits := make([]*devops.CicdDeploymentCommit, 0, 1)
 	// do not use `.First` method since gorm would append ORDER BY ID to the query which leads to a error
-	err := db.All(
+	err = db.All(
 		&deploymentCommits,
 		dal.Select("dc.*"),
 		dal.From("cicd_deployment_commits dc"),
@@ -229,7 +237,7 @@ func getDeploymentCommit(mergeSha string, projectName string, db dal.Dal) (*devo
 		return nil, err
 	}
 	if len(deploymentCommits) == 0 {
-		return getDeploymentCommitByAutodetectedPr(mergeSha, projectName, db)
+		return nil, nil
 	}
 	return deploymentCommits[0], nil
 }

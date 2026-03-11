@@ -43,6 +43,7 @@ import (
 type WebhookDeploymentReq struct {
 	Id                  string `mapstructure:"id" validate:"required"`
 	DisplayTitle        string `mapstructure:"displayTitle"`
+	Url                 string `mapstructure:"url"`
 	Result              string `mapstructure:"result"`
 	Environment         string `validate:"omitempty,oneof=PRODUCTION STAGING TESTING DEVELOPMENT"`
 	OriginalEnvironment string `mapstructure:"originalEnvironment"`
@@ -57,6 +58,7 @@ type WebhookDeploymentReq struct {
 
 type WebhookDeploymentCommitReq struct {
 	DisplayTitle string     `mapstructure:"displayTitle"`
+	Url          string     `mapstructure:"url"`
 	RepoId       string     `mapstructure:"repoId"`
 	RepoUrl      string     `mapstructure:"repoUrl" validate:"required"`
 	Name         string     `mapstructure:"name"`
@@ -319,6 +321,7 @@ func CreateDeploymentAndDeploymentCommits(connection *models.WebhookConnection, 
 			RepoId:              commit.RepoId,
 			Name:                commit.Name,
 			DisplayTitle:        commit.DisplayTitle,
+			Url:                 commit.Url,
 			RepoUrl:             commit.RepoUrl,
 			Environment:         request.Environment,
 			OriginalEnvironment: request.OriginalEnvironment,
@@ -341,6 +344,7 @@ func CreateDeploymentAndDeploymentCommits(connection *models.WebhookConnection, 
 	deployment.StartedDate = request.StartedDate
 	deployment.FinishedDate = request.FinishedDate
 	deployment.Result = request.Result
+	deployment.Url = request.Url
 	if err := tx.CreateOrUpdate(deployment); err != nil {
 		logger.Error(err, "failed to save deployment")
 		return err
