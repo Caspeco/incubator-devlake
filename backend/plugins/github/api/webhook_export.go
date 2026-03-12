@@ -29,6 +29,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/apache/incubator-devlake/core/dal"
 	"github.com/apache/incubator-devlake/core/errors"
 	"github.com/apache/incubator-devlake/core/plugin"
 	"github.com/apache/incubator-devlake/helpers/dbhelper"
@@ -52,6 +53,7 @@ type GithubWebhookExportReq struct {
 	WebhookConnectionId     uint64   `mapstructure:"webhookConnectionId" validate:"required"`
 	LookbackDays            int      `mapstructure:"lookbackDays" validate:"required,min=1"`
 	Submit                  bool     `mapstructure:"submit"`
+	GithubConnectionId      uint64   `json:"-" mapstructure:"-"`
 }
 
 type GithubWebhookExportResponse struct {
@@ -298,6 +300,7 @@ func ExportWebhookData(input *plugin.ApiResourceInput) (*plugin.ApiResourceOutpu
 	if err != nil {
 		return nil, errors.Default.Wrap(err, "unable to create github api client")
 	}
+	req.GithubConnectionId = githubConnection.ID
 
 	export, err := prepareGithubWebhookExport(apiClient, req)
 	if err != nil {
@@ -339,6 +342,10 @@ func prepareGithubWebhookExport(apiClient plugin.ApiClient, req *GithubWebhookEx
 	logger := basicRes.GetLogger()
 	lookbackSince := time.Now().AddDate(0, 0, -req.LookbackDays)
 	normalizedTeamPrefixes := normalizeJiraProjectPrefixes(req.TeamPrefix, req.TeamPrefixes)
+	excludedGithubAccountIDs, err := fetchExcludedGithubAccountIDs(req.GithubConnectionId)
+	if err != nil {
+		return nil, err
+	}
 	repo, err := fetchGithubRepo(apiClient, req.RepoFullName)
 	if err != nil {
 		return nil, err
@@ -388,6 +395,9 @@ func prepareGithubWebhookExport(apiClient plugin.ApiClient, req *GithubWebhookEx
 			return nil, err
 		}
 		for _, comment := range issueComments {
+			if isExcludedGithubCommentAuthor(comment.User, excludedGithubAccountIDs) {
+				continue
+			}
 			commentPayload := buildWebhookIssueComment(selected.pr.Number, comment)
 			export.pullRequestComments = append(export.pullRequestComments, commentPayload)
 			if err := export.addCall("pull_request_comment", req.WebhookConnectionId, "pull_request_comments", commentPayload); err != nil {
@@ -400,6 +410,9 @@ func prepareGithubWebhookExport(apiClient plugin.ApiClient, req *GithubWebhookEx
 			return nil, err
 		}
 		for _, comment := range reviewComments {
+			if isExcludedGithubCommentAuthor(comment.User, excludedGithubAccountIDs) {
+				continue
+			}
 			commentPayload := buildWebhookReviewComment(selected.pr.Number, comment)
 			export.pullRequestComments = append(export.pullRequestComments, commentPayload)
 			if err := export.addCall("pull_request_comment", req.WebhookConnectionId, "pull_request_comments", commentPayload); err != nil {
@@ -413,6 +426,9 @@ func prepareGithubWebhookExport(apiClient plugin.ApiClient, req *GithubWebhookEx
 		}
 		for _, review := range reviews {
 			if review.SubmittedAt == nil {
+				continue
+			}
+			if isExcludedGithubCommentAuthor(review.User, excludedGithubAccountIDs) {
 				continue
 			}
 			commentPayload := buildWebhookReviewSummary(selected.pr.Number, review)
@@ -820,6 +836,23 @@ func fetchGithubRepoDeploymentStatuses(apiClient plugin.ApiClient, repoFullName 
 	return statuses, nil
 }
 
+func fetchExcludedGithubAccountIDs(connectionID uint64) (map[int]struct{}, errors.Error) {
+	excludedAccounts := make([]models.GithubAccount, 0)
+	err := basicRes.GetDal().All(
+		&excludedAccounts,
+		dal.Where("connection_id = ?", connectionID),
+		dal.Where("exclude_from_computation = ?", true),
+	)
+	if err != nil {
+		return nil, err
+	}
+	excluded := make(map[int]struct{}, len(excludedAccounts))
+	for _, account := range excludedAccounts {
+		excluded[account.Id] = struct{}{}
+	}
+	return excluded, nil
+}
+
 func filterGithubWorkflowsByName(workflows []githubWorkflowResponse, requested []string) []githubWorkflowResponse {
 	requestedNames := make(map[string]struct{}, len(requested))
 	for _, name := range requested {
@@ -974,6 +1007,14 @@ func buildWebhookReviewSummary(prNumber int, review githubReviewResponse) webhoo
 		req.AccountId = fmt.Sprintf("%d", review.User.ID)
 	}
 	return req
+}
+
+func isExcludedGithubCommentAuthor(user *githubUserRef, excludedGithubAccountIDs map[int]struct{}) bool {
+	if user == nil || len(excludedGithubAccountIDs) == 0 {
+		return false
+	}
+	_, excluded := excludedGithubAccountIDs[user.ID]
+	return excluded
 }
 
 func buildWebhookDeployment(

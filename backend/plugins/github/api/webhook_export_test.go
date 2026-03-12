@@ -308,6 +308,19 @@ func TestApplyNewestPullRequestTitleToDeployments(t *testing.T) {
 	}
 }
 
+func TestIsExcludedGithubCommentAuthor(t *testing.T) {
+	excluded := map[int]struct{}{123: {}}
+	if !isExcludedGithubCommentAuthor(&githubUserRef{ID: 123}, excluded) {
+		t.Fatal("expected excluded github user to be filtered")
+	}
+	if isExcludedGithubCommentAuthor(&githubUserRef{ID: 456}, excluded) {
+		t.Fatal("did not expect non-excluded github user to be filtered")
+	}
+	if isExcludedGithubCommentAuthor(nil, excluded) {
+		t.Fatal("did not expect nil github user to be filtered")
+	}
+}
+
 func TestSameShaDeploymentCarriesPreviousMatchedPRsForward(t *testing.T) {
 	sha := "same-sha"
 	candidates := []githubDeploymentCandidate{
