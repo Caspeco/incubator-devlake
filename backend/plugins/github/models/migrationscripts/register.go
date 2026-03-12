@@ -59,5 +59,6 @@ func All() []plugin.MigrationScript {
 		new(addConvertGithubDeploymentToScopeConfigs),
 		new(addAutodetectCherryPickedPrsToScopeConfigs),
 		new(addExcludeFromComputationToGithubAccounts),
+		new(addWebhookExportsToConnections),
 	}
 }

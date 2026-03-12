@@ -58,6 +58,15 @@ type GithubConn struct {
 	GithubAppKey          `mapstructure:",squash" authMethod:"AppKey"`
 }
 
+type GithubWebhookExport struct {
+	Name                    string   `json:"name" mapstructure:"name"`
+	RepoFullName            string   `json:"repoFullName" mapstructure:"repoFullName"`
+	TeamPrefixes            []string `json:"teamPrefixes" mapstructure:"teamPrefixes"`
+	DeploymentWorkflowNames []string `json:"deploymentWorkflowNames" mapstructure:"deploymentWorkflowNames"`
+	WebhookConnectionId     uint64   `json:"webhookConnectionId" mapstructure:"webhookConnectionId"`
+	LookbackDays            int      `json:"lookbackDays" mapstructure:"lookbackDays"`
+}
+
 // PrepareApiClient splits Token to tokens for SetupAuthentication to utilize
 func (conn *GithubConn) PrepareApiClient(apiClient plugin.ApiClient) errors.Error {
 
@@ -99,6 +108,7 @@ type GithubConnection struct {
 	helper.BaseConnection `mapstructure:",squash"`
 	GithubConn            `mapstructure:",squash"`
 	EnableGraphql         bool `mapstructure:"enableGraphql" json:"enableGraphql"`
+	WebhookExports        []GithubWebhookExport `mapstructure:"webhookExports" json:"webhookExports" gorm:"type:json;serializer:json"`
 }
 
 const (
@@ -141,6 +151,9 @@ func (connection *GithubConnection) Merge(existed, modified *GithubConnection, b
 	existed.Proxy = modified.Proxy
 	existed.Endpoint = modified.Endpoint
 	existed.RateLimitPerHour = modified.RateLimitPerHour
+	if _, ok := body["webhookExports"]; ok {
+		existed.WebhookExports = modified.WebhookExports
+	}
 
 	// handle secret
 	if existSecretKey == "" {

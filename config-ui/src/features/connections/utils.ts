@@ -30,6 +30,7 @@ export const transformConnection = (plugin: string, connection: IConnectionAPI):
     name: connection.name,
     status: IConnectionStatus.IDLE,
     endpoint: connection.endpoint,
+    webhookExports: connection.webhookExports ?? [],
     authMethod: connection.authMethod,
     token: connection.token,
     username: connection.username,

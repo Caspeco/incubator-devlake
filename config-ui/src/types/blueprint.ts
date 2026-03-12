@@ -31,6 +31,7 @@ export interface IBlueprint {
   cronConfig: string;
   skipOnFail: boolean;
   plan: any;
+  webhookExportKeys: string[];
   timeAfter: null | string;
   connections: Array<{
     pluginName: string;

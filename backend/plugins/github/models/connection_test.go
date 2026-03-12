@@ -18,9 +18,9 @@ limitations under the License.
 package models
 
 import (
-	"github.com/apache/incubator-devlake/helpers/pluginhelper/api"
 	"testing"
 
+	"github.com/apache/incubator-devlake/helpers/pluginhelper/api"
 	"github.com/go-playground/validator/v10"
 	"github.com/stretchr/testify/assert"
 )
@@ -226,4 +226,47 @@ func TestGithubConnection_Sanitize(t *testing.T) {
 			assert.Equalf(t, tt.want, connection.Sanitize(), "Sanitize()")
 		})
 	}
+}
+
+func TestGithubConnection_MergeWebhookExports(t *testing.T) {
+	existed := &GithubConnection{
+		WebhookExports: []GithubWebhookExport{
+			{
+				Name:                    "existing",
+				RepoFullName:            "Caspeco/MARC",
+				TeamPrefixes:            []string{"AIR"},
+				DeploymentWorkflowNames: []string{"ANALYS Build & Publish Analytics Dump prod"},
+				WebhookConnectionId:     4,
+				LookbackDays:            60,
+			},
+		},
+	}
+	modified := &GithubConnection{
+		WebhookExports: []GithubWebhookExport{
+			{
+				Name:                    "updated",
+				RepoFullName:            "Caspeco/MARC",
+				TeamPrefixes:            []string{"STAFF", "LONII"},
+				DeploymentWorkflowNames: []string{},
+				WebhookConnectionId:     3,
+				LookbackDays:            30,
+			},
+		},
+	}
+
+	t.Run("preserve when field absent", func(t *testing.T) {
+		current := *existed
+		err := current.Merge(&current, modified, map[string]interface{}{})
+		assert.NoError(t, err)
+		assert.Equal(t, existed.WebhookExports, current.WebhookExports)
+	})
+
+	t.Run("update when field present", func(t *testing.T) {
+		current := *existed
+		err := current.Merge(&current, modified, map[string]interface{}{
+			"webhookExports": []interface{}{},
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, modified.WebhookExports, current.WebhookExports)
+	})
 }

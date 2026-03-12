@@ -20,6 +20,14 @@ export interface IConnectionAPI {
   id: ID;
   name: string;
   endpoint: string;
+  webhookExports?: Array<{
+    name: string;
+    repoFullName: string;
+    teamPrefixes: string[];
+    deploymentWorkflowNames: string[];
+    webhookConnectionId?: number;
+    lookbackDays: number;
+  }>;
   authMethod?: string;
   token?: string;
   username?: string;
@@ -74,6 +82,14 @@ export interface IConnection {
   name: string;
   status: IConnectionStatus;
   endpoint: string;
+  webhookExports?: Array<{
+    name: string;
+    repoFullName: string;
+    teamPrefixes: string[];
+    deploymentWorkflowNames: string[];
+    webhookConnectionId?: number;
+    lookbackDays: number;
+  }>;
   authMethod?: string;
   token?: string;
   username?: string;

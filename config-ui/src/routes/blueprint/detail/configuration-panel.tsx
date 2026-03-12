@@ -19,12 +19,13 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { FormOutlined, PlusOutlined } from '@ant-design/icons';
-import { Flex, Table, Button } from 'antd';
+import { Alert, Button, Flex, Space, Table, Tag, message } from 'antd';
 
 import API from '@/api';
 import { NoData } from '@/components';
 import { getCron, PATHS } from '@/config';
-import { ConnectionName } from '@/features';
+import { ConnectionName, selectConnections, selectWebhooks } from '@/features';
+import { useAppSelector } from '@/hooks';
 import { getPluginConfig } from '@/plugins';
 import { IBlueprint, IBPMode } from '@/types';
 import { formatTime, operator } from '@/utils';
@@ -42,14 +43,27 @@ interface Props {
   onChangeTab: (tab: string) => void;
 }
 
-export const ConfigurationPanel = ({ from, blueprint, onRefresh, onChangeTab }: Props) => {
+export const ConfigurationPanel = ({
+  from,
+  blueprint,
+  onRefresh,
+  onChangeTab,
+}: Props) => {
   const [type, setType] = useState<'name' | 'policy' | 'add-connection'>();
   const [rawPlan, setRawPlan] = useState('');
   const [operating, setOperating] = useState(false);
+  const [selectedWebhookExportKeys, setSelectedWebhookExportKeys] = useState<string[]>([]);
+
+  const githubConnections = useAppSelector((state) => selectConnections(state, 'github'));
+  const webhooks = useAppSelector(selectWebhooks);
 
   useEffect(() => {
     setRawPlan(JSON.stringify(blueprint.plan, null, '  '));
   }, [blueprint]);
+
+  useEffect(() => {
+    setSelectedWebhookExportKeys(blueprint.webhookExportKeys ?? []);
+  }, [blueprint.webhookExportKeys]);
 
   const connections = useMemo(
     () =>
@@ -68,6 +82,36 @@ export const ConfigurationPanel = ({ from, blueprint, onRefresh, onChangeTab }: 
     [blueprint],
   );
 
+  const availableWebhookExports = useMemo(() => {
+    const blueprintWebhookIds = blueprint.connections
+      .filter((cs) => cs.pluginName === 'webhook')
+      .map((cs) => Number(cs.connectionId));
+
+    return githubConnections
+      .flatMap((connection) =>
+        (connection.webhookExports ?? []).map((webhookExport, index) => ({
+          key: `${connection.id}:${index}`,
+          connectionId: connection.id,
+          connectionName: connection.name,
+          name: webhookExport.name || 'Unnamed export',
+          repoFullName: webhookExport.repoFullName,
+          teamPrefixes: webhookExport.teamPrefixes ?? [],
+          deploymentWorkflowNames: webhookExport.deploymentWorkflowNames ?? [],
+          webhookConnectionId: webhookExport.webhookConnectionId,
+          webhookConnectionName:
+            webhooks.find((webhook) => Number(webhook.id) === Number(webhookExport.webhookConnectionId))?.name ??
+            undefined,
+          lookbackDays: webhookExport.lookbackDays,
+        })),
+      )
+      .filter((webhookExport) => blueprintWebhookIds.includes(Number(webhookExport.webhookConnectionId)));
+  }, [blueprint.connections, githubConnections, webhooks]);
+
+  const selectedWebhookExports = useMemo(
+    () => availableWebhookExports.filter((webhookExport) => selectedWebhookExportKeys.includes(webhookExport.key)),
+    [availableWebhookExports, selectedWebhookExportKeys],
+  );
+
   const handleCancel = () => {
     setType(undefined);
   };
@@ -82,6 +126,14 @@ export const ConfigurationPanel = ({ from, blueprint, onRefresh, onChangeTab }: 
 
   const handleShowAddConnectionDialog = () => {
     setType('add-connection');
+  };
+
+  const handleSaveWebhookExportSelection = () => {
+    handleUpdate({ webhookExportKeys: selectedWebhookExportKeys });
+  };
+
+  const handleRunSelectedWebhookExports = () => {
+    message.info('Dummy action only. Running selected webhook exports is not wired yet.');
   };
 
   const handleUpdate = async (payload: any) => {
@@ -221,6 +273,130 @@ export const ConfigurationPanel = ({ from, blueprint, onRefresh, onChangeTab }: 
                 </Button>
               </Flex>
             </Flex>
+          )}
+        </div>
+      )}
+      {blueprint.mode === IBPMode.NORMAL && (
+        <div className="block">
+          <h3>Webhook Export Jobs</h3>
+          <Alert
+            style={{ marginBottom: 16 }}
+            type="info"
+            message="Preview only for now. This lets you try how export selection should feel in Blueprint settings before backend blueprint association is wired."
+          />
+          {!availableWebhookExports.length ? (
+            <NoData
+              text={
+                <>
+                  No saved webhook exports were found on the GitHub connections already attached to this blueprint.
+                </>
+              }
+            />
+          ) : (
+            <Space direction="vertical" size={12} style={{ display: 'flex' }}>
+              <div>
+                Select the export jobs that should run with this blueprint. This is still frontend-only for now, but
+                the selection flow is now explicit.
+              </div>
+              <Table
+                rowKey="key"
+                size="middle"
+                pagination={false}
+                rowSelection={{
+                  columnTitle: 'Use',
+                  selectedRowKeys: selectedWebhookExportKeys,
+                  onChange: (selectedRowKeys) => setSelectedWebhookExportKeys(selectedRowKeys as string[]),
+                }}
+                columns={[
+                  {
+                    title: 'Export',
+                    dataIndex: 'name',
+                    key: 'name',
+                  },
+                  {
+                    title: 'GitHub Connection',
+                    dataIndex: 'connectionName',
+                    key: 'connectionName',
+                  },
+                  {
+                    title: 'Repository',
+                    dataIndex: 'repoFullName',
+                    key: 'repoFullName',
+                  },
+                  {
+                    title: 'Prefixes',
+                    dataIndex: 'teamPrefixes',
+                    key: 'teamPrefixes',
+                    render: (val: string[]) => (
+                      <Space size={[4, 4]} wrap>
+                        {val.map((prefix) => (
+                          <Tag key={prefix} color="blue">
+                            {prefix}
+                          </Tag>
+                        ))}
+                      </Space>
+                    ),
+                  },
+                  {
+                    title: 'Workflows',
+                    dataIndex: 'deploymentWorkflowNames',
+                    key: 'deploymentWorkflowNames',
+                    render: (val: string[]) =>
+                      val.length ? (
+                        <Space size={[4, 4]} wrap>
+                          {val.map((workflowName) => (
+                            <Tag key={workflowName} color="gold">
+                              {workflowName}
+                            </Tag>
+                          ))}
+                        </Space>
+                      ) : (
+                        <span>Deployments API only</span>
+                      ),
+                  },
+                  {
+                    title: 'Webhook Target',
+                    dataIndex: 'webhookConnectionId',
+                    key: 'webhookConnectionId',
+                    align: 'center',
+                    render: (val: number | undefined, row: any) =>
+                      val ? `${row.webhookConnectionName ?? 'Webhook'} (#${val})` : 'Unset',
+                  },
+                  {
+                    title: 'Lookback',
+                    dataIndex: 'lookbackDays',
+                    key: 'lookbackDays',
+                    align: 'center',
+                    render: (val: number) => `${val} days`,
+                  },
+                ]}
+                dataSource={availableWebhookExports}
+              />
+              <Flex justify="space-between" align="center">
+                <Space size={[8, 8]} wrap>
+                  <strong>Selected for this blueprint:</strong>
+                  {selectedWebhookExports.length ? (
+                    selectedWebhookExports.map((webhookExport) => (
+                      <Tag key={`selected-${webhookExport.key}`} color="green">
+                        {webhookExport.name}
+                      </Tag>
+                    ))
+                  ) : (
+                    <span>None</span>
+                  )}
+                </Space>
+                <Space>
+                  <Button onClick={handleRunSelectedWebhookExports}>Run Selected Exports</Button>
+                  <Button type="primary" onClick={handleSaveWebhookExportSelection}>
+                    Save Export Selection
+                  </Button>
+                </Space>
+              </Flex>
+              <Alert
+                type="warning"
+                message="Selection persistence is real now. Running selected exports is still a dummy action until pipeline execution is wired."
+              />
+            </Space>
           )}
         </div>
       )}

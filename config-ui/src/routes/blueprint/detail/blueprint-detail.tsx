@@ -22,6 +22,8 @@ import { Tabs, message } from 'antd';
 import axios from 'axios';
 import API from '@/api';
 import { PageLoading } from '@/components';
+import { selectConnections } from '@/features';
+import { useAppSelector } from '@/hooks';
 import { useRefreshData } from '@/hooks';
 import { PATHS } from '@/config';
 
@@ -39,6 +41,7 @@ interface Props {
 export const BlueprintDetail = ({ id, from }: Props) => {
   const [version, setVersion] = useState(1);
   const [activeKey, setActiveKey] = useState('status');
+  const githubConnections = useAppSelector((state) => selectConnections(state, 'github'));
 
   const { state } = useLocation();
   const navigate = useNavigate();
@@ -75,6 +78,16 @@ export const BlueprintDetail = ({ id, from }: Props) => {
   }
 
   const [blueprint, lastPipeline] = data;
+  const savedWebhookExportNames =
+    (blueprint.webhookExportKeys ?? []).length > 0
+      ? (blueprint.webhookExportKeys ?? [])
+          .map((key: string) => {
+            const [connectionId, exportIndex] = key.split(':');
+            const githubConnection = githubConnections.find((it) => `${it.id}` === connectionId);
+            return githubConnection?.webhookExports?.[Number(exportIndex)]?.name;
+          })
+          .filter(Boolean)
+      : [];
 
   return (
     <S.Wrapper>
@@ -85,7 +98,13 @@ export const BlueprintDetail = ({ id, from }: Props) => {
             key: 'status',
             label: 'Status',
             children: (
-              <StatusPanel from={from} blueprint={blueprint} pipelineId={lastPipeline?.id} onRefresh={handlRefresh} />
+              <StatusPanel
+                from={from}
+                blueprint={blueprint}
+                pipelineId={lastPipeline?.id}
+                onRefresh={handlRefresh}
+                savedWebhookExportNames={savedWebhookExportNames as string[]}
+              />
             ),
           },
           {
