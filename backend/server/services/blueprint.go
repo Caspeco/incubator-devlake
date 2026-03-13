@@ -20,6 +20,7 @@ package services
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -30,6 +31,7 @@ import (
 	"github.com/apache/incubator-devlake/core/models"
 	helper "github.com/apache/incubator-devlake/helpers/pluginhelper/api"
 	"github.com/apache/incubator-devlake/impls/logruslog"
+	githubmodels "github.com/apache/incubator-devlake/plugins/github/models"
 	"github.com/robfig/cron/v3"
 )
 
@@ -374,11 +376,45 @@ func MakePlanForBlueprint(blueprint *models.Blueprint, syncPolicy *models.SyncPo
 	if syncPolicy != nil && syncPolicy.SkipCollectors {
 		skipCollectors = true
 	}
-	plan, err := GeneratePlanJsonV200(blueprint.ProjectName, blueprint.Connections, metrics, skipCollectors)
+	webhookExportKeys, err := collectBlueprintWebhookExportKeys(blueprint.Connections)
+	if err != nil {
+		return nil, err
+	}
+	plan, err = GeneratePlanJsonV200(blueprint.ProjectName, blueprint.Connections, webhookExportKeys, metrics, skipCollectors)
 	if err != nil {
 		return nil, err
 	}
 	return SequentializePipelinePlans(blueprint.BeforePlan, plan, blueprint.AfterPlan), nil
+}
+
+func collectBlueprintWebhookExportKeys(connections []*models.BlueprintConnection) ([]string, errors.Error) {
+	webhookConnectionIDs := make(map[uint64]struct{})
+	for _, connection := range connections {
+		if connection.PluginName == "webhook" {
+			webhookConnectionIDs[connection.ConnectionId] = struct{}{}
+		}
+	}
+	if len(webhookConnectionIDs) == 0 {
+		return nil, nil
+	}
+
+	var githubConnections []githubmodels.GithubConnection
+	if err := db.All(&githubConnections); err != nil {
+		return nil, errors.Convert(err)
+	}
+
+	keys := make([]string, 0)
+	for _, connection := range githubConnections {
+		for _, webhookExport := range connection.WebhookExports {
+			if _, ok := webhookConnectionIDs[webhookExport.WebhookConnectionId]; !ok || webhookExport.Id == "" {
+				continue
+			}
+			keys = append(keys, fmt.Sprintf("%d:%s", connection.ID, webhookExport.Id))
+		}
+	}
+
+	sort.Strings(keys)
+	return keys, nil
 }
 
 // ParallelizePipelinePlans merges multiple pipelines into one unified plan

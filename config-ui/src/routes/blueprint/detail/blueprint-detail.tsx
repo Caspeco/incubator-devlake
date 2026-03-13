@@ -22,8 +22,11 @@ import { Tabs, message } from 'antd';
 import axios from 'axios';
 import API from '@/api';
 import { PageLoading } from '@/components';
+import { selectConnections, selectWebhooks } from '@/features';
+import { useAppSelector } from '@/hooks';
 import { useRefreshData } from '@/hooks';
 import { PATHS } from '@/config';
+import { IBlueprint } from '@/types';
 
 import { FromEnum } from '../types';
 
@@ -39,6 +42,8 @@ interface Props {
 export const BlueprintDetail = ({ id, from }: Props) => {
   const [version, setVersion] = useState(1);
   const [activeKey, setActiveKey] = useState('status');
+  const githubConnections = useAppSelector((state) => selectConnections(state, 'github'));
+  const webhooks = useAppSelector(selectWebhooks);
 
   const { state } = useLocation();
   const navigate = useNavigate();
@@ -75,6 +80,18 @@ export const BlueprintDetail = ({ id, from }: Props) => {
   }
 
   const [blueprint, lastPipeline] = data;
+  const blueprintWebhookIds = blueprint.connections
+    .filter((connection: IBlueprint['connections'][number]) => connection.pluginName === 'webhook')
+    .map((connection: IBlueprint['connections'][number]) => Number(connection.connectionId));
+  const availableWebhookExportNames = githubConnections
+    .flatMap((connection) =>
+      (connection.webhookExports ?? [])
+        .filter((webhookExport) => blueprintWebhookIds.includes(Number(webhookExport.webhookConnectionId)))
+        .map((webhookExport) => {
+          const webhookName = webhooks.find((webhook) => Number(webhook.id) === Number(webhookExport.webhookConnectionId))?.name;
+          return webhookExport.name || webhookName || 'Unnamed export';
+        }),
+    );
 
   return (
     <S.Wrapper>
@@ -85,7 +102,13 @@ export const BlueprintDetail = ({ id, from }: Props) => {
             key: 'status',
             label: 'Status',
             children: (
-              <StatusPanel from={from} blueprint={blueprint} pipelineId={lastPipeline?.id} onRefresh={handlRefresh} />
+              <StatusPanel
+                from={from}
+                blueprint={blueprint}
+                pipelineId={lastPipeline?.id}
+                onRefresh={handlRefresh}
+                savedWebhookExportNames={availableWebhookExportNames}
+              />
             ),
           },
           {

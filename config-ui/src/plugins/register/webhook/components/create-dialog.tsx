@@ -45,6 +45,8 @@ export const CreateDialog = ({ open, onCancel, onSubmitAfter }: Props) => {
     closeIssuesEndpoint: '',
     postDeploymentsCurl: '',
     postPullRequestsEndpoint: '',
+    postPullRequestCommitsEndpoint: '',
+    postPullRequestCommentsEndpoint: '',
     apiKey: '',
   });
 
@@ -163,6 +165,10 @@ export const CreateDialog = ({ open, onCancel, onSubmitAfter }: Props) => {
               </ExternalLink>
               .
             </p>
+            <h5>Post to register pull_request commits</h5>
+            <CopyText content={record.postPullRequestCommitsEndpoint} />
+            <h5>Post to register pull_request comments</h5>
+            <CopyText content={record.postPullRequestCommentsEndpoint} />
           </Block>
         </S.Wrapper>
       )}

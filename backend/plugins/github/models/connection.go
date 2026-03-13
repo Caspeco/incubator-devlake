@@ -31,6 +31,7 @@ import (
 	"github.com/apache/incubator-devlake/core/plugin"
 	helper "github.com/apache/incubator-devlake/helpers/pluginhelper/api"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 )
 
 const (
@@ -56,6 +57,16 @@ type GithubConn struct {
 	helper.MultiAuth      `mapstructure:",squash"`
 	GithubAccessToken     `mapstructure:",squash" authMethod:"AccessToken"`
 	GithubAppKey          `mapstructure:",squash" authMethod:"AppKey"`
+}
+
+type GithubWebhookExport struct {
+	Id                      string   `json:"id" mapstructure:"id"`
+	Name                    string   `json:"name" mapstructure:"name"`
+	RepoFullName            string   `json:"repoFullName" mapstructure:"repoFullName"`
+	TeamPrefixes            []string `json:"teamPrefixes" mapstructure:"teamPrefixes"`
+	DeploymentWorkflowNames []string `json:"deploymentWorkflowNames" mapstructure:"deploymentWorkflowNames"`
+	WebhookConnectionId     uint64   `json:"webhookConnectionId" mapstructure:"webhookConnectionId"`
+	LookbackDays            int      `json:"lookbackDays" mapstructure:"lookbackDays"`
 }
 
 // PrepareApiClient splits Token to tokens for SetupAuthentication to utilize
@@ -98,7 +109,8 @@ func (gat *GithubAccessToken) GetTokensCount() int {
 type GithubConnection struct {
 	helper.BaseConnection `mapstructure:",squash"`
 	GithubConn            `mapstructure:",squash"`
-	EnableGraphql         bool `mapstructure:"enableGraphql" json:"enableGraphql"`
+	EnableGraphql         bool                  `mapstructure:"enableGraphql" json:"enableGraphql"`
+	WebhookExports        []GithubWebhookExport `mapstructure:"webhookExports" json:"webhookExports" gorm:"type:json;serializer:json"`
 }
 
 const (
@@ -141,6 +153,12 @@ func (connection *GithubConnection) Merge(existed, modified *GithubConnection, b
 	existed.Proxy = modified.Proxy
 	existed.Endpoint = modified.Endpoint
 	existed.RateLimitPerHour = modified.RateLimitPerHour
+	if _, ok := body["webhookExports"]; ok {
+		assignWebhookExportIds(modified.WebhookExports)
+		existed.WebhookExports = modified.WebhookExports
+	} else {
+		assignWebhookExportIds(existed.WebhookExports)
+	}
 
 	// handle secret
 	if existSecretKey == "" {
@@ -237,6 +255,14 @@ func (connection *GithubConnection) Merge(existed, modified *GithubConnection, b
 
 	existed.Token = strings.Join(mergedToken, ",")
 	return nil
+}
+
+func assignWebhookExportIds(exports []GithubWebhookExport) {
+	for i := range exports {
+		if exports[i].Id == "" {
+			exports[i].Id = uuid.NewString()
+		}
+	}
 }
 
 func (conn *GithubConn) typeIs(token string) string {

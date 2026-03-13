@@ -19,12 +19,13 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { FormOutlined, PlusOutlined } from '@ant-design/icons';
-import { Flex, Table, Button } from 'antd';
+import { Button, Flex, Space, Table, Tag } from 'antd';
 
 import API from '@/api';
 import { NoData } from '@/components';
 import { getCron, PATHS } from '@/config';
-import { ConnectionName } from '@/features';
+import { ConnectionName, selectConnections, selectWebhooks } from '@/features';
+import { useAppSelector } from '@/hooks';
 import { getPluginConfig } from '@/plugins';
 import { IBlueprint, IBPMode } from '@/types';
 import { formatTime, operator } from '@/utils';
@@ -42,10 +43,18 @@ interface Props {
   onChangeTab: (tab: string) => void;
 }
 
-export const ConfigurationPanel = ({ from, blueprint, onRefresh, onChangeTab }: Props) => {
+export const ConfigurationPanel = ({
+  from,
+  blueprint,
+  onRefresh,
+  onChangeTab,
+}: Props) => {
   const [type, setType] = useState<'name' | 'policy' | 'add-connection'>();
   const [rawPlan, setRawPlan] = useState('');
   const [operating, setOperating] = useState(false);
+
+  const githubConnections = useAppSelector((state) => selectConnections(state, 'github'));
+  const webhooks = useAppSelector(selectWebhooks);
 
   useEffect(() => {
     setRawPlan(JSON.stringify(blueprint.plan, null, '  '));
@@ -67,6 +76,31 @@ export const ConfigurationPanel = ({ from, blueprint, onRefresh, onChangeTab }: 
         .filter(Boolean),
     [blueprint],
   );
+
+  const availableWebhookExports = useMemo(() => {
+    const blueprintWebhookIds = blueprint.connections
+      .filter((cs) => cs.pluginName === 'webhook')
+      .map((cs) => Number(cs.connectionId));
+
+    return githubConnections
+      .flatMap((connection) =>
+        (connection.webhookExports ?? []).map((webhookExport, index) => ({
+          key: `${connection.id}:${webhookExport.id ?? index}`,
+          connectionId: connection.id,
+          connectionName: connection.name,
+          name: webhookExport.name || 'Unnamed export',
+          repoFullName: webhookExport.repoFullName,
+          teamPrefixes: webhookExport.teamPrefixes ?? [],
+          deploymentWorkflowNames: webhookExport.deploymentWorkflowNames ?? [],
+          webhookConnectionId: webhookExport.webhookConnectionId,
+          webhookConnectionName:
+            webhooks.find((webhook) => Number(webhook.id) === Number(webhookExport.webhookConnectionId))?.name ??
+            undefined,
+          lookbackDays: webhookExport.lookbackDays,
+        })),
+      )
+      .filter((webhookExport) => blueprintWebhookIds.includes(Number(webhookExport.webhookConnectionId)));
+  }, [blueprint.connections, githubConnections, webhooks]);
 
   const handleCancel = () => {
     setType(undefined);
@@ -221,6 +255,92 @@ export const ConfigurationPanel = ({ from, blueprint, onRefresh, onChangeTab }: 
                 </Button>
               </Flex>
             </Flex>
+          )}
+        </div>
+      )}
+      {blueprint.mode === IBPMode.NORMAL && (
+        <div className="block">
+          <h3>Webhook Export Jobs</h3>
+          {!availableWebhookExports.length ? (
+            <NoData
+              text="No saved webhook exports were found for the webhook connections attached to this blueprint."
+            />
+          ) : (
+            <Space direction="vertical" size={12} style={{ display: 'flex' }}>
+              <div>
+                These jobs come from the GitHub connection configuration and are run automatically when they target
+                this blueprint&apos;s webhook connection.
+              </div>
+              <Table
+                rowKey="key"
+                size="middle"
+                pagination={false}
+                columns={[
+                  {
+                    title: 'Export',
+                    dataIndex: 'name',
+                    key: 'name',
+                  },
+                  {
+                    title: 'GitHub Connection',
+                    dataIndex: 'connectionName',
+                    key: 'connectionName',
+                  },
+                  {
+                    title: 'Repository',
+                    dataIndex: 'repoFullName',
+                    key: 'repoFullName',
+                  },
+                  {
+                    title: 'Prefixes',
+                    dataIndex: 'teamPrefixes',
+                    key: 'teamPrefixes',
+                    render: (val: string[]) => (
+                      <Space size={[4, 4]} wrap>
+                        {val.map((prefix) => (
+                          <Tag key={prefix} color="blue">
+                            {prefix}
+                          </Tag>
+                        ))}
+                      </Space>
+                    ),
+                  },
+                  {
+                    title: 'Workflows',
+                    dataIndex: 'deploymentWorkflowNames',
+                    key: 'deploymentWorkflowNames',
+                    render: (val: string[]) =>
+                      val.length ? (
+                        <Space size={[4, 4]} wrap>
+                          {val.map((workflowName) => (
+                            <Tag key={workflowName} color="gold">
+                              {workflowName}
+                            </Tag>
+                          ))}
+                        </Space>
+                      ) : (
+                        <span>Deployments API only</span>
+                      ),
+                  },
+                  {
+                    title: 'Webhook Target',
+                    dataIndex: 'webhookConnectionId',
+                    key: 'webhookConnectionId',
+                    align: 'center',
+                    render: (val: number | undefined, row: any) =>
+                      val ? `${row.webhookConnectionName ?? 'Webhook'} (#${val})` : 'Unset',
+                  },
+                  {
+                    title: 'Lookback',
+                    dataIndex: 'lookbackDays',
+                    key: 'lookbackDays',
+                    align: 'center',
+                    render: (val: number) => `${val} days`,
+                  },
+                ]}
+                dataSource={availableWebhookExports}
+              />
+            </Space>
           )}
         </div>
       )}

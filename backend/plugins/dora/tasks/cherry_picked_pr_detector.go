@@ -74,6 +74,7 @@ func DetectCherryPickedPullRequests(taskCtx plugin.SubTaskContext) errors.Error 
 	err := db.Delete(
 		&models.DeploymentCommitPullRequest{},
 		dal.Where("project_name = ?", projectName),
+		dal.Where("detection_method <> ?", "github_webhook_export_compare"),
 	)
 	if err != nil {
 		return err

@@ -22,7 +22,7 @@ import { DOC_URL } from '@/release';
 import { IPluginConfig } from '@/types';
 
 import Icon from './assets/icon.svg?react';
-import { Token, GithubApp, Authentication } from './connection-fields';
+import { Token, GithubApp, Authentication, WebhookExports } from './connection-fields';
 
 export const GitHubConfig: IPluginConfig = {
   plugin: 'github',
@@ -34,6 +34,7 @@ export const GitHubConfig: IPluginConfig = {
     initialValues: {
       endpoint: 'https://api.github.com/',
       authMethod: 'AccessToken',
+      webhookExports: [],
     },
     fields: [
       'name',
@@ -88,6 +89,14 @@ export const GitHubConfig: IPluginConfig = {
           'Rate Limit Value Reference\nGitHub: 0-5,000 requests/hour\nGitHub Enterprise: 0-15,000 requests/hour',
         defaultValue: 4500,
       },
+      ({ initialValues, values, setValues }: any) => (
+        <WebhookExports
+          key="webhookExports"
+          initialValues={initialValues}
+          values={values}
+          setValues={setValues}
+        />
+      ),
     ],
   },
   dataScope: {

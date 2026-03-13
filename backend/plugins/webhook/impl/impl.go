@@ -93,6 +93,12 @@ func (p Webhook) ApiResources() map[string]map[string]plugin.ApiResourceHandler 
 		"connections/:connectionId/pull_requests": {
 			"POST": api.PostPullRequests,
 		},
+		"connections/:connectionId/pull_request_commits": {
+			"POST": api.PostPullRequestCommits,
+		},
+		"connections/:connectionId/pull_request_comments": {
+			"POST": api.PostPullRequestComments,
+		},
 		"connections/:connectionId/issues": {
 			"POST": api.PostIssue,
 		},
@@ -104,6 +110,12 @@ func (p Webhook) ApiResources() map[string]map[string]plugin.ApiResourceHandler 
 		},
 		":connectionId/pull_requests": {
 			"POST": api.PostPullRequests,
+		},
+		":connectionId/pull_request_commits": {
+			"POST": api.PostPullRequestCommits,
+		},
+		":connectionId/pull_request_comments": {
+			"POST": api.PostPullRequestComments,
 		},
 		":connectionId/issues": {
 			"POST": api.PostIssue,
@@ -121,6 +133,12 @@ func (p Webhook) ApiResources() map[string]map[string]plugin.ApiResourceHandler 
 		},
 		"connections/by-name/:connectionName/pull_requests": {
 			"POST": api.PostPullRequestsByName,
+		},
+		"connections/by-name/:connectionName/pull_request_commits": {
+			"POST": api.PostPullRequestCommitsByName,
+		},
+		"connections/by-name/:connectionName/pull_request_comments": {
+			"POST": api.PostPullRequestCommentsByName,
 		},
 		"connections/by-name/:connectionName/issues": {
 			"POST": api.PostIssueByName,

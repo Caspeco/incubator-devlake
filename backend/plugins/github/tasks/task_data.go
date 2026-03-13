@@ -27,18 +27,20 @@ import (
 )
 
 type GithubOptions struct {
-	ConnectionId  uint64                    `json:"connectionId" mapstructure:"connectionId,omitempty"`
-	ScopeConfigId uint64                    `json:"scopeConfigId" mapstructure:"scopeConfigId,omitempty"`
-	GithubId      int                       `json:"githubId" mapstructure:"githubId,omitempty"`
-	Owner         string                    `json:"owner" mapstructure:"owner,omitempty"`
-	Repo          string                    `json:"repo"  mapstructure:"repo,omitempty"`
-	Name          string                    `json:"name"  mapstructure:"name,omitempty"`
-	FullName      string                    `json:"fullName"  mapstructure:"fullName,omitempty"`
-	ScopeConfig   *models.GithubScopeConfig `mapstructure:"scopeConfig,omitempty" json:"scopeConfig"`
+	ConnectionId     uint64                    `json:"connectionId" mapstructure:"connectionId,omitempty"`
+	ScopeConfigId    uint64                    `json:"scopeConfigId" mapstructure:"scopeConfigId,omitempty"`
+	WebhookExportKey string                    `json:"webhookExportKey" mapstructure:"webhookExportKey,omitempty"`
+	GithubId         int                       `json:"githubId" mapstructure:"githubId,omitempty"`
+	Owner            string                    `json:"owner" mapstructure:"owner,omitempty"`
+	Repo             string                    `json:"repo"  mapstructure:"repo,omitempty"`
+	Name             string                    `json:"name"  mapstructure:"name,omitempty"`
+	FullName         string                    `json:"fullName"  mapstructure:"fullName,omitempty"`
+	ScopeConfig      *models.GithubScopeConfig `mapstructure:"scopeConfig,omitempty" json:"scopeConfig"`
 }
 
 type GithubTaskData struct {
 	Options       *GithubOptions
+	Connection    *models.GithubConnection
 	ApiClient     *helper.ApiAsyncClient
 	GraphqlClient *helper.GraphqlAsyncClient
 	RegexEnricher *helper.RegexEnricher
@@ -69,6 +71,12 @@ func DecodeTaskOptions(options map[string]interface{}) (*GithubOptions, errors.E
 }
 
 func ValidateTaskOptions(op *GithubOptions) errors.Error {
+	if op.WebhookExportKey != "" {
+		if op.ConnectionId == 0 {
+			return errors.BadInput.New("connectionId is invalid")
+		}
+		return nil
+	}
 	if op.Name == "" {
 		op.Name = strings.Trim(fmt.Sprintf("%s/%s", op.Owner, op.Repo), " ")
 	}

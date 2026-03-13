@@ -142,6 +142,13 @@ func (p Github) PrepareTaskData(taskCtx plugin.TaskContext, options map[string]i
 	if err != nil {
 		return nil, errors.Default.Wrap(err, "unable to get github API client instance")
 	}
+	if op.WebhookExportKey != "" {
+		return &tasks.GithubTaskData{
+			Options:    op,
+			Connection: connection,
+			ApiClient:  apiClient,
+		}, nil
+	}
 	err = EnrichOptions(taskCtx, op, apiClient.ApiClient)
 	if err != nil {
 		return nil, err
@@ -160,6 +167,7 @@ func (p Github) PrepareTaskData(taskCtx plugin.TaskContext, options map[string]i
 
 	taskData := &tasks.GithubTaskData{
 		Options:       op,
+		Connection:    connection,
 		ApiClient:     apiClient,
 		RegexEnricher: regexEnricher,
 	}
@@ -221,6 +229,9 @@ func (p Github) ApiResources() map[string]map[string]plugin.ApiResourceHandler {
 		},
 		"connections/:connectionId/proxy/rest/*path": {
 			"GET": api.Proxy,
+		},
+		"connections/:connectionId/webhook-export": {
+			"POST": api.ExportWebhookData,
 		},
 		"scope-config/:scopeConfigId/projects": {
 			"GET": api.GetProjectsByScopeConfig,

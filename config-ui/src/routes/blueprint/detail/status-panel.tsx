@@ -19,7 +19,7 @@
 import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MoreOutlined, DeleteOutlined } from '@ant-design/icons';
-import { Card, Modal, Switch, Button, Tooltip, Dropdown, Flex, Space } from 'antd';
+import { Card, Modal, Switch, Button, Tooltip, Dropdown, Flex, Space, Tag } from 'antd';
 
 import API from '@/api';
 import { Message } from '@/components';
@@ -36,9 +36,10 @@ interface Props {
   blueprint: IBlueprint;
   pipelineId?: ID;
   onRefresh: () => void;
+  savedWebhookExportNames: string[];
 }
 
-export const StatusPanel = ({ from, blueprint, pipelineId, onRefresh }: Props) => {
+export const StatusPanel = ({ from, blueprint, pipelineId, onRefresh, savedWebhookExportNames }: Props) => {
   const [type, setType] = useState<'delete' | 'fullSync'>();
   const [page, setPage] = useState(1);
   const [pageSize] = useState(10);
@@ -182,6 +183,20 @@ export const StatusPanel = ({ from, blueprint, pipelineId, onRefresh }: Props) =
           <Card>There is no current run for this blueprint.</Card>
         ) : (
           <>
+            {!!savedWebhookExportNames.length && (
+              <Card>
+                <Flex vertical gap="middle">
+                  <h4 style={{ margin: 0 }}>Webhook Export Stage</h4>
+                  <Space size={[8, 8]} wrap>
+                    {savedWebhookExportNames.map((name) => (
+                      <Tag key={name} color="processing">
+                        {name}
+                      </Tag>
+                    ))}
+                  </Space>
+                </Flex>
+              </Card>
+            )}
             <Card>
               <PipelineInfo id={pipelineId} />
             </Card>

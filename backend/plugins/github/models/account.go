@@ -28,6 +28,7 @@ type GithubAccount struct {
 	Name         string `json:"name" gorm:"type:varchar(255)"`
 	Company      string `json:"company" gorm:"type:varchar(255)"`
 	Email        string `json:"Email" gorm:"type:varchar(255)"`
+	ExcludeFromComputation bool `json:"excludeFromComputation" gorm:"type:boolean;default:false"`
 	AvatarUrl    string `json:"avatar_url" gorm:"type:varchar(255)"`
 	Url          string `json:"url" gorm:"type:varchar(255)"`
 	HtmlUrl      string `json:"html_url" gorm:"type:varchar(255)"`
