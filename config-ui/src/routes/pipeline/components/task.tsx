@@ -47,7 +47,11 @@ export const PipelineTask = ({ task }: Props) => {
 
     switch (true) {
       case ['github', 'github_graphql'].includes(config.plugin):
-        name = `${name}:${options.name}`;
+        if (options.webhookExportKey) {
+          name = `${name}:webhook export`;
+        } else {
+          name = `${name}:${options.name}`;
+        }
         break;
       case ['gitextractor'].includes(config.plugin):
         name = `${name}:${options.name}`;

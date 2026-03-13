@@ -20,6 +20,7 @@ package services
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/apache/incubator-devlake/core/errors"
@@ -31,6 +32,7 @@ import (
 func GeneratePlanJsonV200(
 	projectName string,
 	connections []*coreModels.BlueprintConnection,
+	webhookExportKeys []string,
 	metrics map[string]json.RawMessage,
 	skipCollectors bool,
 ) (coreModels.PipelinePlan, errors.Error) {
@@ -132,12 +134,43 @@ func GeneratePlanJsonV200(
 			}
 		}
 	}
+	webhookExportPlan := makeWebhookExportPlan(webhookExportKeys)
 	plan := SequentializePipelinePlans(
 		planForProjectMapping,
 		ParallelizePipelinePlans(sourcePlans...),
+		webhookExportPlan,
 		ParallelizePipelinePlans(metricPlans...),
 	)
 	return plan, err
+}
+
+func makeWebhookExportPlan(webhookExportKeys []string) coreModels.PipelinePlan {
+	if len(webhookExportKeys) == 0 {
+		return nil
+	}
+	stage := make(coreModels.PipelineStage, 0, len(webhookExportKeys))
+	for _, exportKey := range webhookExportKeys {
+		parts := strings.Split(exportKey, ":")
+		if len(parts) != 2 {
+			continue
+		}
+		connectionID, err := strconv.ParseUint(parts[0], 10, 64)
+		if err != nil {
+			continue
+		}
+		stage = append(stage, &coreModels.PipelineTask{
+			Plugin:   "github",
+			Subtasks: []string{"Run Webhook Export"},
+			Options: map[string]interface{}{
+				"connectionId":     connectionID,
+				"webhookExportKey": exportKey,
+			},
+		})
+	}
+	if len(stage) == 0 {
+		return nil
+	}
+	return coreModels.PipelinePlan{stage}
 }
 
 func removeCollectorTasks(plan coreModels.PipelinePlan) coreModels.PipelinePlan {

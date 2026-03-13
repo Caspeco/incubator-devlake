@@ -118,17 +118,14 @@ export const WebhookExports = ({ initialValues, values, setValues }: Props) => {
   return (
     <Block
       title="Webhook Exports"
-      description="Draft webhook export definitions for this GitHub connection. This is frontend-only for now so you can try the shape before backend persistence is added."
+      description="Define webhook export configurations for this GitHub connection."
     >
       <Space direction="vertical" size={16} style={{ display: 'flex' }}>
         {webhookExports.length === 0 ? (
           <Card size="small">
             <Space direction="vertical" size={8}>
               <div>No export definitions added yet.</div>
-              <div>
-                Expected shape: repo, team prefixes, optional workflow names, target webhook connection, and lookback
-                window.
-              </div>
+              <div>Add a repository, prefixes, optional workflow names, target webhook connection, and lookback.</div>
             </Space>
           </Card>
         ) : (

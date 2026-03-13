@@ -36,6 +36,7 @@ import (
 	helper "github.com/apache/incubator-devlake/helpers/pluginhelper/api"
 	doramodels "github.com/apache/incubator-devlake/plugins/dora/models"
 	"github.com/apache/incubator-devlake/plugins/github/models"
+	"github.com/apache/incubator-devlake/plugins/github/tasks"
 	webhookapi "github.com/apache/incubator-devlake/plugins/webhook/api"
 	webhookmodels "github.com/apache/incubator-devlake/plugins/webhook/models"
 )
@@ -246,15 +247,59 @@ type githubSelectedPullRequest struct {
 }
 
 type githubDeploymentCandidate struct {
-	workflow   githubWorkflowResponse
-	run        githubRunResponse
+	workflow       githubWorkflowResponse
+	run            githubRunResponse
 	deploymentData *githubRepoDeploymentResponse
 	statusData     *githubRepoDeploymentStatusResponse
-	deployment webhookapi.WebhookDeploymentReq
+	deployment     webhookapi.WebhookDeploymentReq
 }
 
 var jiraProjectPrefixSanitizer = regexp.MustCompile(`[^A-Z0-9]+`)
 var githubMergeCommitPRNumberMatcher = regexp.MustCompile(`\(#(\d+)\)`)
+
+func ResolveGithubWebhookExport(connection *models.GithubConnection, exportKey string) (*models.GithubWebhookExport, errors.Error) {
+	parts := strings.Split(exportKey, ":")
+	if len(parts) != 2 {
+		return nil, errors.BadInput.New("invalid webhook export key")
+	}
+	connectionID, err := strconv.ParseUint(parts[0], 10, 64)
+	if err != nil {
+		return nil, errors.BadInput.Wrap(err, "invalid webhook export connection id")
+	}
+	if connectionID != connection.ID {
+		return nil, errors.BadInput.New("webhook export key does not belong to the github connection")
+	}
+	index, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return nil, errors.BadInput.Wrap(err, "invalid webhook export index")
+	}
+	if index < 0 || index >= len(connection.WebhookExports) {
+		return nil, errors.BadInput.New("webhook export key is out of range")
+	}
+	return &connection.WebhookExports[index], nil
+}
+
+func SubmitGithubWebhookExport(apiClient plugin.ApiClient, githubConnection *models.GithubConnection, exportConfig *models.GithubWebhookExport) errors.Error {
+	webhookConnectionHelper := helper.NewConnectionHelper(basicRes, vld, "webhook")
+	webhookConnection := &webhookmodels.WebhookConnection{}
+	if err := webhookConnectionHelper.FirstById(webhookConnection, exportConfig.WebhookConnectionId); err != nil {
+		return errors.BadInput.Wrap(err, "unable to get webhook connection by the given connection ID")
+	}
+	req := &GithubWebhookExportReq{
+		RepoFullName:            exportConfig.RepoFullName,
+		TeamPrefixes:            exportConfig.TeamPrefixes,
+		DeploymentWorkflowNames: exportConfig.DeploymentWorkflowNames,
+		WebhookConnectionId:     exportConfig.WebhookConnectionId,
+		LookbackDays:            exportConfig.LookbackDays,
+		Submit:                  true,
+		GithubConnectionId:      githubConnection.ID,
+	}
+	export, err := prepareGithubWebhookExport(apiClient, req)
+	if err != nil {
+		return err
+	}
+	return submitGithubWebhookExport(webhookConnection, export)
+}
 
 func ExportWebhookData(input *plugin.ApiResourceInput) (*plugin.ApiResourceOutput, errors.Error) {
 	req := &GithubWebhookExportReq{}
@@ -336,6 +381,30 @@ func ExportWebhookData(input *plugin.ApiResourceInput) (*plugin.ApiResourceOutpu
 		},
 		Status: http.StatusOK,
 	}, nil
+}
+
+func init() {
+	tasks.RegisterSubtaskMeta(&RunWebhookExportMeta)
+}
+
+var RunWebhookExportMeta = plugin.SubTaskMeta{
+	Name:             "Run Webhook Export",
+	EntryPoint:       RunWebhookExport,
+	EnabledByDefault: true,
+	Description:      "Run a saved GitHub webhook export configuration and submit the result to the target webhook connection.",
+	DomainTypes:      []string{plugin.DOMAIN_TYPE_CROSS, plugin.DOMAIN_TYPE_CODE_REVIEW, plugin.DOMAIN_TYPE_CICD},
+}
+
+func RunWebhookExport(taskCtx plugin.SubTaskContext) errors.Error {
+	data := taskCtx.GetData().(*tasks.GithubTaskData)
+	if data.Connection == nil {
+		return errors.Default.New("github connection is missing from task data")
+	}
+	exportConfig, err := ResolveGithubWebhookExport(data.Connection, data.Options.WebhookExportKey)
+	if err != nil {
+		return err
+	}
+	return SubmitGithubWebhookExport(data.ApiClient, data.Connection, exportConfig)
 }
 
 func prepareGithubWebhookExport(apiClient plugin.ApiClient, req *GithubWebhookExportReq) (*githubWebhookPreparedExport, errors.Error) {
@@ -1322,7 +1391,6 @@ func findGithubDeploymentIncludedPRNumbers(
 			if !ok || !githubCommitTitleMatchesAnyTeamPrefix(title, teamPrefixes) {
 				continue
 			}
-			logger.Info("==== found deployments %s included %s ===", current.deployment.Name, prNumber)
 			matchedCurrentDeployment = true
 			if parsedPRNumber, err := strconv.Atoi(prNumber); err == nil {
 				includedPRNumbers[parsedPRNumber] = struct{}{}
@@ -1338,6 +1406,21 @@ func findGithubDeploymentIncludedPRNumbers(
 		}
 		if matchedCurrentDeployment {
 			includedDeploymentIds[current.deployment.Id] = struct{}{}
+			matchedPRNumbers := make([]int, 0, len(seenPRsForDeployment))
+			for prNumber := range seenPRsForDeployment {
+				matchedPRNumbers = append(matchedPRNumbers, prNumber)
+			}
+			sort.Ints(matchedPRNumbers)
+			matchedPRNumbersText := make([]string, 0, len(matchedPRNumbers))
+			for _, prNumber := range matchedPRNumbers {
+				matchedPRNumbersText = append(matchedPRNumbersText, strconv.Itoa(prNumber))
+			}
+			logger.Info(
+				"matched deployment to pull requests: deployment=%s deploymentId=%s prs=%s",
+				current.deployment.Name,
+				current.deployment.Id,
+				strings.Join(matchedPRNumbersText, ", "),
+			)
 		}
 	}
 	return githubSortedPRNumbers(includedPRNumbers), includedDeploymentIds, deploymentLinksById, nil

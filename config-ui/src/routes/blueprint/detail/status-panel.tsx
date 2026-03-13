@@ -186,8 +186,7 @@ export const StatusPanel = ({ from, blueprint, pipelineId, onRefresh, savedWebho
             {!!savedWebhookExportNames.length && (
               <Card>
                 <Flex vertical gap="middle">
-                  <h4 style={{ margin: 0 }}>Dummy Pre-DORA Stage</h4>
-                  <div>Github webhook exports would execute here before DORA calculations start.</div>
+                  <h4 style={{ margin: 0 }}>Webhook Export Stage</h4>
                   <Space size={[8, 8]} wrap>
                     {savedWebhookExportNames.map((name) => (
                       <Tag key={name} color="processing">

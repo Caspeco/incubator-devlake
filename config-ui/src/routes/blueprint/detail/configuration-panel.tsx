@@ -19,7 +19,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { FormOutlined, PlusOutlined } from '@ant-design/icons';
-import { Alert, Button, Flex, Space, Table, Tag, message } from 'antd';
+import { Alert, Button, Flex, Space, Table, Tag } from 'antd';
 
 import API from '@/api';
 import { NoData } from '@/components';
@@ -132,8 +132,19 @@ export const ConfigurationPanel = ({
     handleUpdate({ webhookExportKeys: selectedWebhookExportKeys });
   };
 
-  const handleRunSelectedWebhookExports = () => {
-    message.info('Dummy action only. Running selected webhook exports is not wired yet.');
+  const handleRunSelectedWebhookExports = async () => {
+    const [success] = await operator(
+      () => API.blueprint.trigger(blueprint.id, { skipCollectors: false, fullSync: false }),
+      {
+        setOperating,
+        formatMessage: () => 'Trigger blueprint successful.',
+      },
+    );
+
+    if (success) {
+      onRefresh();
+      onChangeTab('status');
+    }
   };
 
   const handleUpdate = async (payload: any) => {
@@ -279,25 +290,17 @@ export const ConfigurationPanel = ({
       {blueprint.mode === IBPMode.NORMAL && (
         <div className="block">
           <h3>Webhook Export Jobs</h3>
-          <Alert
-            style={{ marginBottom: 16 }}
-            type="info"
-            message="Preview only for now. This lets you try how export selection should feel in Blueprint settings before backend blueprint association is wired."
-          />
           {!availableWebhookExports.length ? (
             <NoData
               text={
                 <>
-                  No saved webhook exports were found on the GitHub connections already attached to this blueprint.
+                  No saved webhook exports were found for the webhook connections attached to this blueprint.
                 </>
               }
             />
           ) : (
             <Space direction="vertical" size={12} style={{ display: 'flex' }}>
-              <div>
-                Select the export jobs that should run with this blueprint. This is still frontend-only for now, but
-                the selection flow is now explicit.
-              </div>
+              <div>Select the export jobs that should run with this blueprint.</div>
               <Table
                 rowKey="key"
                 size="middle"
@@ -392,10 +395,6 @@ export const ConfigurationPanel = ({
                   </Button>
                 </Space>
               </Flex>
-              <Alert
-                type="warning"
-                message="Selection persistence is real now. Running selected exports is still a dummy action until pipeline execution is wired."
-              />
             </Space>
           )}
         </div>

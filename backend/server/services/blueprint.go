@@ -374,7 +374,7 @@ func MakePlanForBlueprint(blueprint *models.Blueprint, syncPolicy *models.SyncPo
 	if syncPolicy != nil && syncPolicy.SkipCollectors {
 		skipCollectors = true
 	}
-	plan, err := GeneratePlanJsonV200(blueprint.ProjectName, blueprint.Connections, metrics, skipCollectors)
+	plan, err := GeneratePlanJsonV200(blueprint.ProjectName, blueprint.Connections, blueprint.WebhookExportKeys, metrics, skipCollectors)
 	if err != nil {
 		return nil, err
 	}
