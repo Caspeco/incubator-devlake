@@ -730,7 +730,17 @@ func fetchGithubDeployments(
 
 	githubDeployments, err := fetchGithubRepoDeployments(apiClient, req.RepoFullName)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		if isGithubDeploymentsSourceUnauthorized(err) {
+			warning := fmt.Sprintf(
+				"skipped github deployments source for %s because the token cannot access /deployments; continuing with workflow-based deployments only",
+				req.RepoFullName,
+			)
+			logger.Warn(err, warning)
+			warnings = append(warnings, warning)
+			githubDeployments = nil
+		} else {
+			return nil, nil, nil, nil, err
+		}
 	}
 	logger.Info("scanned github deployments: repo=%s deployments=%d", req.RepoFullName, len(githubDeployments))
 	for _, deploymentData := range githubDeployments {
@@ -833,6 +843,7 @@ func fetchGithubDeployments(
 			)
 		}
 	}
+	candidates = deduplicateGithubDeploymentCandidates(candidates)
 	sortGithubDeploymentCandidates(candidates)
 	includedPRNumbers, includedDeploymentIds, deploymentLinksById, err := findGithubDeploymentIncludedPRNumbers(apiClient, req.RepoFullName, teamPrefixes, candidates)
 	if err != nil {
@@ -888,6 +899,19 @@ func fetchGithubRepoDeployments(apiClient plugin.ApiClient, repoFullName string)
 		page++
 	}
 	return deployments, nil
+}
+
+func isGithubDeploymentsSourceUnauthorized(err errors.Error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "repos/") &&
+		strings.Contains(message, "/deployments") &&
+		(strings.Contains(message, "bad credentials") ||
+			strings.Contains(message, "resource not accessible") ||
+			strings.Contains(message, "401") ||
+			strings.Contains(message, "403"))
 }
 
 func fetchGithubRepoDeploymentStatuses(apiClient plugin.ApiClient, repoFullName string, deploymentID int) ([]githubRepoDeploymentStatusResponse, errors.Error) {
@@ -952,6 +976,49 @@ func joinGithubWorkflowNames(workflows []githubWorkflowResponse) string {
 		names = append(names, workflow.Name)
 	}
 	return strings.Join(names, ", ")
+}
+
+func deduplicateGithubDeploymentCandidates(candidates []githubDeploymentCandidate) []githubDeploymentCandidate {
+	if len(candidates) < 2 {
+		return candidates
+	}
+	dedupedByKey := make(map[string]githubDeploymentCandidate, len(candidates))
+	order := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		key := githubDeploymentCandidateDedupKey(candidate)
+		if key == "" {
+			key = candidate.deployment.Id
+		}
+		existing, ok := dedupedByKey[key]
+		if !ok {
+			dedupedByKey[key] = candidate
+			order = append(order, key)
+			continue
+		}
+		if githubDeploymentExecutionTime(candidate.deployment).After(githubDeploymentExecutionTime(existing.deployment)) {
+			dedupedByKey[key] = candidate
+		}
+	}
+	deduped := make([]githubDeploymentCandidate, 0, len(order))
+	for _, key := range order {
+		deduped = append(deduped, dedupedByKey[key])
+	}
+	return deduped
+}
+
+func githubDeploymentCandidateDedupKey(candidate githubDeploymentCandidate) string {
+	if len(candidate.deployment.DeploymentCommits) == 0 {
+		return ""
+	}
+	primaryCommit := candidate.deployment.DeploymentCommits[0]
+	if strings.TrimSpace(primaryCommit.CommitSha) == "" {
+		return ""
+	}
+	return strings.Join([]string{
+		primaryCommit.RepoUrl,
+		candidate.deployment.Environment,
+		primaryCommit.CommitSha,
+	}, "|")
 }
 
 func fetchGithubWorkflowRuns(apiClient plugin.ApiClient, repoFullName string, workflowID int, lookbackSince time.Time) ([]githubRunResponse, errors.Error) {

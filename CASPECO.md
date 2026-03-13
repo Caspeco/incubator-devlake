@@ -111,12 +111,16 @@ This document lists each change introduced in this fork after the baseline commi
   - prefer explicit webhook-export deployment mappings when computing lead time, but only for `github_webhook_export_compare`
 - Added GitHub scope-config support for `convertGithubDeployment` to allow disabling standard GitHub deployment conversion when needed.
 - Added `exclude_from_computation` to GitHub accounts so selected bot/tool accounts can be ignored during export of comments and reviews.
-- Blueprint model now stores `webhookExportKeys`, and normal blueprint plans inject a GitHub export stage before metric stages.
+- Normal blueprint plans now derive webhook export jobs automatically from GitHub connection configuration by matching saved exports to the blueprint’s attached webhook connections, and inject a GitHub export stage before metric stages.
 - Config UI updates include:
   - GitHub connection form support for multiple saved webhook exports
   - webhook connection dropdown selection
   - workflow-name list inputs
-  - blueprint export selection UI
+  - blueprint webhook export job visibility sourced from GitHub connection configuration
   - pipeline task naming for webhook export tasks
   - webhook “View Webhook” dialog support for PR commit/comment endpoints
+  - webhook creation dialog support for PR commit/comment endpoints
+- Workflow-based deployment export uses exact matches from `deploymentWorkflowNames`, while GitHub Deployments API export remains environment-pattern based for production-like names.
+- Exported deployment display titles now use the newest matched PR title instead of a generic `deploy` label.
+- Export compare logging is grouped per deployment and lists the matched PR numbers in one line.
 - Removed the historical `caspeco-patches` patch artifact directory from the branch.

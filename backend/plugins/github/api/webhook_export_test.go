@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	coreerrors "github.com/apache/incubator-devlake/core/errors"
 	webhookapi "github.com/apache/incubator-devlake/plugins/webhook/api"
 )
 
@@ -374,5 +375,139 @@ func TestSameShaDeploymentCarriesPreviousMatchedPRsForward(t *testing.T) {
 	}
 	if links[0].PullRequestKey != 101 || links[0].MatchedCommitSha != "merge-sha-101" {
 		t.Fatalf("unexpected carried link: %+v", links[0])
+	}
+}
+
+func TestDeduplicateGithubDeploymentCandidatesKeepsLatestExecution(t *testing.T) {
+	earlier := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	later := time.Date(2026, 3, 1, 11, 0, 0, 0, time.UTC)
+	candidates := []githubDeploymentCandidate{
+		{
+			deployment: webhookapi.WebhookDeploymentReq{
+				Id:          "github-deployment-1",
+				Environment: "PRODUCTION",
+				StartedDate: &earlier,
+				DeploymentCommits: []webhookapi.WebhookDeploymentCommitReq{
+					{
+						RepoUrl:   "https://github.com/Caspeco/MARC.git",
+						RefName:   "3.0.0",
+						CommitSha: "abc123",
+					},
+				},
+			},
+		},
+		{
+			deployment: webhookapi.WebhookDeploymentReq{
+				Id:          "github-workflow-1-run-2",
+				Environment: "PRODUCTION",
+				StartedDate: &later,
+				DeploymentCommits: []webhookapi.WebhookDeploymentCommitReq{
+					{
+						RepoUrl:   "https://github.com/Caspeco/MARC.git",
+						RefName:   "3.0.0",
+						CommitSha: "abc123",
+					},
+				},
+			},
+		},
+	}
+
+	deduped := deduplicateGithubDeploymentCandidates(candidates)
+
+	if len(deduped) != 1 {
+		t.Fatalf("expected 1 deduplicated deployment candidate, got %d", len(deduped))
+	}
+	if deduped[0].deployment.Id != "github-workflow-1-run-2" {
+		t.Fatalf("expected later deployment candidate to win, got %s", deduped[0].deployment.Id)
+	}
+}
+
+func TestDeduplicateGithubDeploymentCandidatesDedupsDistinctRefsForSameCommit(t *testing.T) {
+	now := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	candidates := []githubDeploymentCandidate{
+		{
+			deployment: webhookapi.WebhookDeploymentReq{
+				Id:          "dep-1",
+				Environment: "PRODUCTION",
+				StartedDate: &now,
+				DeploymentCommits: []webhookapi.WebhookDeploymentCommitReq{
+					{
+						RepoUrl:   "https://github.com/Caspeco/MARC.git",
+						RefName:   "3.0.0",
+						CommitSha: "abc123",
+					},
+				},
+			},
+		},
+		{
+			deployment: webhookapi.WebhookDeploymentReq{
+				Id:          "dep-2",
+				Environment: "PRODUCTION",
+				StartedDate: &now,
+				DeploymentCommits: []webhookapi.WebhookDeploymentCommitReq{
+					{
+						RepoUrl:   "https://github.com/Caspeco/MARC.git",
+						RefName:   "3.0.1",
+						CommitSha: "abc123",
+					},
+				},
+			},
+		},
+	}
+
+	deduped := deduplicateGithubDeploymentCandidates(candidates)
+
+	if len(deduped) != 1 {
+		t.Fatalf("expected same commit to deduplicate regardless of ref, got %d candidates", len(deduped))
+	}
+}
+
+func TestDeduplicateGithubDeploymentCandidatesKeepsDistinctCommits(t *testing.T) {
+	now := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	candidates := []githubDeploymentCandidate{
+		{
+			deployment: webhookapi.WebhookDeploymentReq{
+				Id:          "dep-1",
+				Environment: "PRODUCTION",
+				StartedDate: &now,
+				DeploymentCommits: []webhookapi.WebhookDeploymentCommitReq{
+					{
+						RepoUrl:   "https://github.com/Caspeco/MARC.git",
+						RefName:   "3.0.0",
+						CommitSha: "abc123",
+					},
+				},
+			},
+		},
+		{
+			deployment: webhookapi.WebhookDeploymentReq{
+				Id:          "dep-2",
+				Environment: "PRODUCTION",
+				StartedDate: &now,
+				DeploymentCommits: []webhookapi.WebhookDeploymentCommitReq{
+					{
+						RepoUrl:   "https://github.com/Caspeco/MARC.git",
+						RefName:   "3.0.1",
+						CommitSha: "def456",
+					},
+				},
+			},
+		},
+	}
+
+	deduped := deduplicateGithubDeploymentCandidates(candidates)
+
+	if len(deduped) != 2 {
+		t.Fatalf("expected distinct commits to remain separate, got %d candidates", len(deduped))
+	}
+}
+
+func TestIsGithubDeploymentsSourceUnauthorized(t *testing.T) {
+	err := coreerrors.BadInput.New("error decoding response from https://api.github.com/repos/Caspeco/MARC/deployments?page=1&per_page=100: raw response: {\"message\":\"Bad credentials\",\"status\":\"401\"}")
+	if !isGithubDeploymentsSourceUnauthorized(err) {
+		t.Fatal("expected bad credentials on /deployments to be treated as a non-fatal deployments source auth error")
+	}
+	if isGithubDeploymentsSourceUnauthorized(coreerrors.BadInput.New("error decoding response from https://api.github.com/repos/Caspeco/MARC/actions/workflows: raw response: {\"message\":\"Bad credentials\",\"status\":\"401\"}")) {
+		t.Fatal("did not expect non-deployments endpoints to match the deployments auth classifier")
 	}
 }
