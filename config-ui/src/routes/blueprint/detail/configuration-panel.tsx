@@ -19,7 +19,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { FormOutlined, PlusOutlined } from '@ant-design/icons';
-import { Alert, Button, Flex, Space, Table, Tag } from 'antd';
+import { Button, Flex, Space, Table, Tag } from 'antd';
 
 import API from '@/api';
 import { NoData } from '@/components';
@@ -52,7 +52,6 @@ export const ConfigurationPanel = ({
   const [type, setType] = useState<'name' | 'policy' | 'add-connection'>();
   const [rawPlan, setRawPlan] = useState('');
   const [operating, setOperating] = useState(false);
-  const [selectedWebhookExportKeys, setSelectedWebhookExportKeys] = useState<string[]>([]);
 
   const githubConnections = useAppSelector((state) => selectConnections(state, 'github'));
   const webhooks = useAppSelector(selectWebhooks);
@@ -60,10 +59,6 @@ export const ConfigurationPanel = ({
   useEffect(() => {
     setRawPlan(JSON.stringify(blueprint.plan, null, '  '));
   }, [blueprint]);
-
-  useEffect(() => {
-    setSelectedWebhookExportKeys(blueprint.webhookExportKeys ?? []);
-  }, [blueprint.webhookExportKeys]);
 
   const connections = useMemo(
     () =>
@@ -107,11 +102,6 @@ export const ConfigurationPanel = ({
       .filter((webhookExport) => blueprintWebhookIds.includes(Number(webhookExport.webhookConnectionId)));
   }, [blueprint.connections, githubConnections, webhooks]);
 
-  const selectedWebhookExports = useMemo(
-    () => availableWebhookExports.filter((webhookExport) => selectedWebhookExportKeys.includes(webhookExport.key)),
-    [availableWebhookExports, selectedWebhookExportKeys],
-  );
-
   const handleCancel = () => {
     setType(undefined);
   };
@@ -126,10 +116,6 @@ export const ConfigurationPanel = ({
 
   const handleShowAddConnectionDialog = () => {
     setType('add-connection');
-  };
-
-  const handleSaveWebhookExportSelection = () => {
-    handleUpdate({ webhookExportKeys: selectedWebhookExportKeys });
   };
 
   const handleUpdate = async (payload: any) => {
@@ -277,24 +263,18 @@ export const ConfigurationPanel = ({
           <h3>Webhook Export Jobs</h3>
           {!availableWebhookExports.length ? (
             <NoData
-              text={
-                <>
-                  No saved webhook exports were found for the webhook connections attached to this blueprint.
-                </>
-              }
+              text="No saved webhook exports were found for the webhook connections attached to this blueprint."
             />
           ) : (
             <Space direction="vertical" size={12} style={{ display: 'flex' }}>
-              <div>Select the export jobs that should run with this blueprint.</div>
+              <div>
+                These jobs come from the GitHub connection configuration and are run automatically when they target
+                this blueprint&apos;s webhook connection.
+              </div>
               <Table
                 rowKey="key"
                 size="middle"
                 pagination={false}
-                rowSelection={{
-                  columnTitle: 'Use',
-                  selectedRowKeys: selectedWebhookExportKeys,
-                  onChange: (selectedRowKeys) => setSelectedWebhookExportKeys(selectedRowKeys as string[]),
-                }}
                 columns={[
                   {
                     title: 'Export',
@@ -360,25 +340,6 @@ export const ConfigurationPanel = ({
                 ]}
                 dataSource={availableWebhookExports}
               />
-              <Flex justify="space-between" align="center">
-                <Space size={[8, 8]} wrap>
-                  <strong>Selected for this blueprint:</strong>
-                  {selectedWebhookExports.length ? (
-                    selectedWebhookExports.map((webhookExport) => (
-                      <Tag key={`selected-${webhookExport.key}`} color="green">
-                        {webhookExport.name}
-                      </Tag>
-                    ))
-                  ) : (
-                    <span>None</span>
-                  )}
-                </Space>
-                <Space>
-                  <Button type="primary" onClick={handleSaveWebhookExportSelection}>
-                    Save Export Selection
-                  </Button>
-                </Space>
-              </Flex>
             </Space>
           )}
         </div>

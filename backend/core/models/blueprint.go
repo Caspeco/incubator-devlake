@@ -34,7 +34,6 @@ type Blueprint struct {
 	ProjectName  string                 `json:"projectName" gorm:"type:varchar(255)"`
 	Mode         string                 `json:"mode" gorm:"varchar(20)" validate:"required,oneof=NORMAL ADVANCED"`
 	Plan         PipelinePlan           `json:"plan" gorm:"serializer:encdec"`
-	WebhookExportKeys []string          `json:"webhookExportKeys" gorm:"type:json;serializer:json"`
 	Enable       bool                   `json:"enable"`
 	CronConfig   string                 `json:"cronConfig" format:"* * * * *" example:"0 0 * * 1"`
 	IsManual     bool                   `json:"isManual"`

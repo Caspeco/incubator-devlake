@@ -22,10 +22,11 @@ import { Tabs, message } from 'antd';
 import axios from 'axios';
 import API from '@/api';
 import { PageLoading } from '@/components';
-import { selectConnections } from '@/features';
+import { selectConnections, selectWebhooks } from '@/features';
 import { useAppSelector } from '@/hooks';
 import { useRefreshData } from '@/hooks';
 import { PATHS } from '@/config';
+import { IBlueprint } from '@/types';
 
 import { FromEnum } from '../types';
 
@@ -42,6 +43,7 @@ export const BlueprintDetail = ({ id, from }: Props) => {
   const [version, setVersion] = useState(1);
   const [activeKey, setActiveKey] = useState('status');
   const githubConnections = useAppSelector((state) => selectConnections(state, 'github'));
+  const webhooks = useAppSelector(selectWebhooks);
 
   const { state } = useLocation();
   const navigate = useNavigate();
@@ -78,22 +80,18 @@ export const BlueprintDetail = ({ id, from }: Props) => {
   }
 
   const [blueprint, lastPipeline] = data;
-  const savedWebhookExportNames =
-    (blueprint.webhookExportKeys ?? []).length > 0
-      ? (blueprint.webhookExportKeys ?? [])
-          .map((key: string) => {
-            const [connectionId, exportIdentifier] = key.split(':');
-            const githubConnection = githubConnections.find((it) => `${it.id}` === connectionId);
-            if (!githubConnection?.webhookExports?.length) {
-              return undefined;
-            }
-            return (
-              githubConnection.webhookExports.find((it) => it.id === exportIdentifier)?.name ??
-              githubConnection.webhookExports[Number(exportIdentifier)]?.name
-            );
-          })
-          .filter(Boolean)
-      : [];
+  const blueprintWebhookIds = blueprint.connections
+    .filter((connection: IBlueprint['connections'][number]) => connection.pluginName === 'webhook')
+    .map((connection: IBlueprint['connections'][number]) => Number(connection.connectionId));
+  const availableWebhookExportNames = githubConnections
+    .flatMap((connection) =>
+      (connection.webhookExports ?? [])
+        .filter((webhookExport) => blueprintWebhookIds.includes(Number(webhookExport.webhookConnectionId)))
+        .map((webhookExport) => {
+          const webhookName = webhooks.find((webhook) => Number(webhook.id) === Number(webhookExport.webhookConnectionId))?.name;
+          return webhookExport.name || webhookName || 'Unnamed export';
+        }),
+    );
 
   return (
     <S.Wrapper>
@@ -109,7 +107,7 @@ export const BlueprintDetail = ({ id, from }: Props) => {
                 blueprint={blueprint}
                 pipelineId={lastPipeline?.id}
                 onRefresh={handlRefresh}
-                savedWebhookExportNames={savedWebhookExportNames as string[]}
+                savedWebhookExportNames={availableWebhookExportNames}
               />
             ),
           },

@@ -4,7 +4,7 @@ Baseline commit: `96f625370ce6eb1c2f658646492681c14f59cbfe`
 
 This document lists each change introduced in this fork after the baseline commit, one section per commit.
 
-## 2025-12-18 - Configure build pipelines (`bdb549197716fa6ce663372f11268d22865afd8d`)
+## 2025-12-18 - Configure build pipelines
 
 ### What changed
 - Reduced and simplified GitHub Actions workflow surface.
@@ -21,14 +21,9 @@ This document lists each change introduced in this fork after the baseline commi
 - `test.yml` update:
   - Removed nightly scheduled run (`cron`).
 
-### Files
-- `.github/workflows/build.yml`
-- `.github/workflows/test.yml`
-- 14 additional deleted workflow files under `.github/workflows/`
-
 ---
 
-## 2026-01-09 - Applied Caspeco Patch (`dd80dc8c79b29b79fdfe3922db762e9e1f9a43f9`)
+## 2026-01-09 - Applied Caspeco Patch
 
 ### What changed
 - Extended GitHub deployment model with explicit latest successful status timestamp.
@@ -47,18 +42,9 @@ This document lists each change introduced in this fork after the baseline commi
   - `ENV_NAME_PATTERN` match now also requires a version-like `ref_name` (`^\d+\.\d+`).
 - Added `caspeco.patch` artifact file to the repo.
 
-### Files
-- `backend/plugins/github/models/deployment.go`
-- `backend/plugins/github/models/migrationscripts/20251217_add_latest_status_update_date_to_deployment.go`
-- `backend/plugins/github/models/migrationscripts/register.go`
-- `backend/plugins/github_graphql/tasks/deployment_collector.go`
-- `backend/plugins/github_graphql/tasks/deployment_extractor.go`
-- `backend/plugins/github_graphql/tasks/deployment_convertor.go`
-- `caspeco.patch`
-
 ---
 
-## 2026-02-13 - Deployment exclusion (`f0ad0e8d3d2fe0d0a2a2dbe503179120cdf3f03d`)
+## 2026-02-13 - Deployment exclusion
 
 ### What changed
 - Added post-extract SQL deduplication for GitHub GraphQL deployments.
@@ -80,18 +66,9 @@ This document lists each change introduced in this fork after the baseline commi
 - `grafana/Dockerfile` now sets `GF_PLUGINS_PREINSTALL_DISABLED=true`.
 - `grafana/dashboards/DORADetails-ChangeFailureRate.json` now explicitly filters deployments to `environment in ('PRODUCTION')` in one query block.
 
-### Files
-- `backend/plugins/github_graphql/tasks/deployment_deduper.go`
-- `backend/plugins/github_graphql/impl/impl.go`
-- `backend/plugins/github_graphql/tasks/deployment_convertor.go`
-- `backend/Dockerfile`
-- `docker-compose.yml`
-- `grafana/Dockerfile`
-- `grafana/dashboards/DORADetails-ChangeFailureRate.json`
-
 ---
 
-## 2026-03-09 - Support cherry-pick-based deployments (`7906fd7ea`)
+## 2026-03-09 - Support cherry-pick-based deployments
 
 ### What changed
 - Added DORA support for deployments that promote cherry-picked commits instead of the original PR merge commit.
@@ -108,17 +85,38 @@ This document lists each change introduced in this fork after the baseline commi
   - migration for `_tool_github_scope_configs`
   - default config value and Config UI checkbox under Additional Settings
 
-### Files
-- `backend/plugins/dora/impl/impl.go`
-- `backend/plugins/dora/impl/impl_test.go`
-- `backend/plugins/dora/models/deployment_commit_pull_request.go`
-- `backend/plugins/dora/models/migrationscripts/20260306_add_cicd_deployment_commit_pull_requests.go`
-- `backend/plugins/dora/models/migrationscripts/register.go`
-- `backend/plugins/dora/tasks/change_lead_time_calculator.go`
-- `backend/plugins/dora/tasks/cherry_picked_pr_detector.go`
-- `backend/plugins/dora/tasks/cherry_picked_pr_detector_test.go`
-- `backend/plugins/github/models/migrationscripts/20260306_add_autodetect_cherry_picked_prs_to_scope_configs.go`
-- `backend/plugins/github/models/migrationscripts/register.go`
-- `backend/plugins/github/models/scope_config.go`
-- `config-ui/src/plugins/register/github/config.tsx`
-- `config-ui/src/plugins/register/github/transformation.tsx`
+---
+
+## 2026-03-12 - Add GitHub webhook export flow and blueprint integration
+
+### What changed
+- Added a GitHub webhook export feature that can collect PRs, PR commits, PR comments, and deployments from GitHub and submit them to webhook connections.
+- Added saved webhook export configurations on GitHub connections and blueprint-level export selection.
+- Extended webhook ingestion to accept PR commits and PR comments directly.
+- Integrated saved exports into blueprint execution ahead of DORA calculations.
+- Added controls for excluding selected GitHub accounts from exported comments and reviews.
+
+### Key details
+- Added `POST /plugins/github/connections/:connectionId/webhook-export`:
+  - supports repo-level export definitions
+  - supports multiple team prefixes
+  - supports exact-match workflow deployment sources and GitHub Deployments API deployment sources
+  - supports retry logic and detailed progress logging
+- Webhook plugin now exposes and accepts:
+  - `pull_request_commits`
+  - `pull_request_comments`
+- Export submission now also writes explicit deployment-to-PR links with `detection_method = github_webhook_export_compare`.
+- DORA behavior was extended to:
+  - preserve exporter-created deployment/PR links during cherry-pick detection cleanup
+  - prefer explicit webhook-export deployment mappings when computing lead time, but only for `github_webhook_export_compare`
+- Added GitHub scope-config support for `convertGithubDeployment` to allow disabling standard GitHub deployment conversion when needed.
+- Added `exclude_from_computation` to GitHub accounts so selected bot/tool accounts can be ignored during export of comments and reviews.
+- Blueprint model now stores `webhookExportKeys`, and normal blueprint plans inject a GitHub export stage before metric stages.
+- Config UI updates include:
+  - GitHub connection form support for multiple saved webhook exports
+  - webhook connection dropdown selection
+  - workflow-name list inputs
+  - blueprint export selection UI
+  - pipeline task naming for webhook export tasks
+  - webhook “View Webhook” dialog support for PR commit/comment endpoints
+- Removed the historical `caspeco-patches` patch artifact directory from the branch.
