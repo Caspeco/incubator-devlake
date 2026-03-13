@@ -269,9 +269,15 @@ func ResolveGithubWebhookExport(connection *models.GithubConnection, exportKey s
 	if connectionID != connection.ID {
 		return nil, errors.BadInput.New("webhook export key does not belong to the github connection")
 	}
-	index, err := strconv.Atoi(parts[1])
+	exportIdentifier := parts[1]
+	for i := range connection.WebhookExports {
+		if connection.WebhookExports[i].Id == exportIdentifier {
+			return &connection.WebhookExports[i], nil
+		}
+	}
+	index, err := strconv.Atoi(exportIdentifier)
 	if err != nil {
-		return nil, errors.BadInput.Wrap(err, "invalid webhook export index")
+		return nil, errors.BadInput.New("webhook export key was not found on the github connection")
 	}
 	if index < 0 || index >= len(connection.WebhookExports) {
 		return nil, errors.BadInput.New("webhook export key is out of range")

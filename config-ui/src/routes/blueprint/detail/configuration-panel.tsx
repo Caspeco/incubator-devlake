@@ -90,7 +90,7 @@ export const ConfigurationPanel = ({
     return githubConnections
       .flatMap((connection) =>
         (connection.webhookExports ?? []).map((webhookExport, index) => ({
-          key: `${connection.id}:${index}`,
+          key: `${connection.id}:${webhookExport.id ?? index}`,
           connectionId: connection.id,
           connectionName: connection.name,
           name: webhookExport.name || 'Unnamed export',
@@ -130,21 +130,6 @@ export const ConfigurationPanel = ({
 
   const handleSaveWebhookExportSelection = () => {
     handleUpdate({ webhookExportKeys: selectedWebhookExportKeys });
-  };
-
-  const handleRunSelectedWebhookExports = async () => {
-    const [success] = await operator(
-      () => API.blueprint.trigger(blueprint.id, { skipCollectors: false, fullSync: false }),
-      {
-        setOperating,
-        formatMessage: () => 'Trigger blueprint successful.',
-      },
-    );
-
-    if (success) {
-      onRefresh();
-      onChangeTab('status');
-    }
   };
 
   const handleUpdate = async (payload: any) => {
@@ -389,7 +374,6 @@ export const ConfigurationPanel = ({
                   )}
                 </Space>
                 <Space>
-                  <Button onClick={handleRunSelectedWebhookExports}>Run Selected Exports</Button>
                   <Button type="primary" onClick={handleSaveWebhookExportSelection}>
                     Save Export Selection
                   </Button>

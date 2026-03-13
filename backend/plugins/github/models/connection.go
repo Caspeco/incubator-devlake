@@ -31,6 +31,7 @@ import (
 	"github.com/apache/incubator-devlake/core/plugin"
 	helper "github.com/apache/incubator-devlake/helpers/pluginhelper/api"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 )
 
 const (
@@ -59,6 +60,7 @@ type GithubConn struct {
 }
 
 type GithubWebhookExport struct {
+	Id                      string   `json:"id" mapstructure:"id"`
 	Name                    string   `json:"name" mapstructure:"name"`
 	RepoFullName            string   `json:"repoFullName" mapstructure:"repoFullName"`
 	TeamPrefixes            []string `json:"teamPrefixes" mapstructure:"teamPrefixes"`
@@ -107,7 +109,7 @@ func (gat *GithubAccessToken) GetTokensCount() int {
 type GithubConnection struct {
 	helper.BaseConnection `mapstructure:",squash"`
 	GithubConn            `mapstructure:",squash"`
-	EnableGraphql         bool `mapstructure:"enableGraphql" json:"enableGraphql"`
+	EnableGraphql         bool                  `mapstructure:"enableGraphql" json:"enableGraphql"`
 	WebhookExports        []GithubWebhookExport `mapstructure:"webhookExports" json:"webhookExports" gorm:"type:json;serializer:json"`
 }
 
@@ -152,7 +154,10 @@ func (connection *GithubConnection) Merge(existed, modified *GithubConnection, b
 	existed.Endpoint = modified.Endpoint
 	existed.RateLimitPerHour = modified.RateLimitPerHour
 	if _, ok := body["webhookExports"]; ok {
+		assignWebhookExportIds(modified.WebhookExports)
 		existed.WebhookExports = modified.WebhookExports
+	} else {
+		assignWebhookExportIds(existed.WebhookExports)
 	}
 
 	// handle secret
@@ -250,6 +255,14 @@ func (connection *GithubConnection) Merge(existed, modified *GithubConnection, b
 
 	existed.Token = strings.Join(mergedToken, ",")
 	return nil
+}
+
+func assignWebhookExportIds(exports []GithubWebhookExport) {
+	for i := range exports {
+		if exports[i].Id == "" {
+			exports[i].Id = uuid.NewString()
+		}
+	}
 }
 
 func (conn *GithubConn) typeIs(token string) string {

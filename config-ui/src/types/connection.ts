@@ -21,6 +21,7 @@ export interface IConnectionAPI {
   name: string;
   endpoint: string;
   webhookExports?: Array<{
+    id?: string;
     name: string;
     repoFullName: string;
     teamPrefixes: string[];
@@ -83,6 +84,7 @@ export interface IConnection {
   status: IConnectionStatus;
   endpoint: string;
   webhookExports?: Array<{
+    id?: string;
     name: string;
     repoFullName: string;
     teamPrefixes: string[];

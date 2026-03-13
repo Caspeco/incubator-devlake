@@ -82,9 +82,15 @@ export const BlueprintDetail = ({ id, from }: Props) => {
     (blueprint.webhookExportKeys ?? []).length > 0
       ? (blueprint.webhookExportKeys ?? [])
           .map((key: string) => {
-            const [connectionId, exportIndex] = key.split(':');
+            const [connectionId, exportIdentifier] = key.split(':');
             const githubConnection = githubConnections.find((it) => `${it.id}` === connectionId);
-            return githubConnection?.webhookExports?.[Number(exportIndex)]?.name;
+            if (!githubConnection?.webhookExports?.length) {
+              return undefined;
+            }
+            return (
+              githubConnection.webhookExports.find((it) => it.id === exportIdentifier)?.name ??
+              githubConnection.webhookExports[Number(exportIdentifier)]?.name
+            );
           })
           .filter(Boolean)
       : [];

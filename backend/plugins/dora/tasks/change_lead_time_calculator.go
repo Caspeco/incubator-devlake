@@ -210,7 +210,7 @@ func getFirstReview(prId string, prCreator string, db dal.Dal) (*code.PullReques
 // getDeploymentCommit takes a merge commit SHA, a repository ID, a list of deployment pairs, and a database connection as input.
 // It returns the deployment pair related to the merge commit, or nil if not found.
 func getDeploymentCommit(mergeSha string, projectName string, db dal.Dal) (*devops.CicdDeploymentCommit, errors.Error) {
-	deployment, err := getDeploymentCommitByAutodetectedPr(mergeSha, projectName, db)
+	deployment, err := getDeploymentCommitByAutodetectedPr(mergeSha, projectName, "github_webhook_export_compare", db)
 	if err != nil {
 		return nil, err
 	}
@@ -242,7 +242,7 @@ func getDeploymentCommit(mergeSha string, projectName string, db dal.Dal) (*devo
 	return deploymentCommits[0], nil
 }
 
-func getDeploymentCommitByAutodetectedPr(mergeSha string, projectName string, db dal.Dal) (*devops.CicdDeploymentCommit, errors.Error) {
+func getDeploymentCommitByAutodetectedPr(mergeSha string, projectName string, detectionMethod string, db dal.Dal) (*devops.CicdDeploymentCommit, errors.Error) {
 	deploymentCommits := make([]*devops.CicdDeploymentCommit, 0, 1)
 	err := db.All(
 		&deploymentCommits,
@@ -252,6 +252,7 @@ func getDeploymentCommitByAutodetectedPr(mergeSha string, projectName string, db
 		dal.Join("INNER JOIN cicd_deployment_commits dc ON (dc.id = dpr.deployment_commit_id)"),
 		dal.Join("LEFT JOIN project_mapping pm ON (pm.table = 'cicd_scopes' AND pm.row_id = dc.cicd_scope_id)"),
 		dal.Where("dpr.project_name = ?", projectName),
+		dal.Where("dpr.detection_method = ?", detectionMethod),
 		dal.Where("pm.project_name = ? AND pr.merge_commit_sha = ?", projectName, mergeSha),
 		dal.Where("dc.prev_success_deployment_commit_id <> ''"),
 		dal.Where("dc.environment = 'PRODUCTION'"),

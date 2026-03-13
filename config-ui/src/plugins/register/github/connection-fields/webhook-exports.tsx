@@ -25,6 +25,7 @@ import { selectWebhooks } from '@/features';
 import { useAppSelector } from '@/hooks';
 
 interface WebhookExport {
+  id?: string;
   name: string;
   repoFullName: string;
   teamPrefixes: string[];
@@ -131,7 +132,7 @@ export const WebhookExports = ({ initialValues, values, setValues }: Props) => {
         ) : (
           webhookExports.map((webhookExport, index) => (
             <Card
-              key={`webhook-export-${index}`}
+              key={`webhook-export-${webhookExport.id ?? index}`}
               size="small"
               title={webhookExport.name || 'Unnamed export'}
               extra={
@@ -217,12 +218,12 @@ export const WebhookExports = ({ initialValues, values, setValues }: Props) => {
                 </Space>
                 <Space size={[8, 8]} wrap>
                   {(webhookExport.teamPrefixes ?? []).map((prefix) => (
-                    <Tag key={`${index}-${prefix}`} color="blue">
+                    <Tag key={`${webhookExport.id ?? index}-${prefix}`} color="blue">
                       {prefix}
                     </Tag>
                   ))}
                   {(webhookExport.deploymentWorkflowNames ?? []).map((workflowName) => (
-                    <Tag key={`${index}-${workflowName}`} color="gold">
+                    <Tag key={`${webhookExport.id ?? index}-${workflowName}`} color="gold">
                       {workflowName}
                     </Tag>
                   ))}
